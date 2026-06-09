@@ -8,7 +8,6 @@ class TcpClient {
 
   TcpSocket* getSocket() const { return socket_.get(); }
 
-
   bool connectToHost(const char* ip, unsigned short port);
 
   private:

@@ -2,7 +2,6 @@
 
 TcpClient::TcpClient() : socket_(nullptr) {}
 
-
 bool TcpClient::connectToHost(const char* ip, unsigned short port) {
   int fd=socket(AF_INET,SOCK_STREAM,0);
 

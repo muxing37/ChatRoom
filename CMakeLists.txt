@@ -1,16 +1,16 @@
 cmake_minimum_required(VERSION 3.10)
-
-project(FTPProject)
+project(ChatRoom)
 
 set(CMAKE_CXX_STANDARD 17)
 
-include_directories(include)
-
-add_executable(ftp
+add_executable(chat
     src/main.cpp
-    src/socket.cpp
     src/server.cpp
     src/client.cpp
+    src/ctrl.cpp
+    src/socket.cpp
 )
 
-target_link_libraries(ftp pthread readline history)
+target_include_directories(chat PRIVATE include)
+
+target_link_libraries(chat pthread readline history)
