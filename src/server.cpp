@@ -1,4 +1,5 @@
 #include "server.h"
+#include <thread>
 
 TcpServer::TcpServer()
     : listenfd_(socket(AF_INET, SOCK_STREAM, 0)) {}
@@ -106,7 +107,6 @@ void FtpSession::start() {
 
     if(token[0]=="exit" || token[0]=="QUIT") {
       signal(SIGCHLD,SIG_IGN);
-      rl_clear_history();
       break;
     }
   }
@@ -115,10 +115,8 @@ void FtpSession::start() {
 
 bool FtpSession::run_cmd(std::vector<std::string> token) {
   bool used = false;
-  // auto path=std::filesystem::current_path();
   std::string now_path=cwd_.string();
   int status;
-  // 在这里使用数据连接，实现LIST、STOR、RETR的接收
   if(token[0]=="STOR") {
     pasv->sendMsg("start_stor");
     std::string path=now_path;
@@ -329,4 +327,31 @@ bool FtpSession::doPASV() {
 
   pasvReady_ = true;
   return true;
+}
+
+int start_server() {
+  chdir(getenv("HOME"));
+  TcpServer server;
+
+  if(!server.setListen(2100)) {
+    std::cerr << "[FAIL] setListen failed\n";
+    return 1;
+  }
+  std::cout << "[INFO] server listening on port 2100...\n";
+
+  while(true) {
+    auto sock = server.acceptConn();
+    if(!sock) {
+      continue;
+    } else {
+      std::cout << "[PASS] client connected\n";
+    }
+    std::thread([sock = std::move(sock)]() mutable {
+        FtpSession session(std::move(sock));
+        session.start();
+      }
+    ).detach();
+  }
+
+  return 0;
 }

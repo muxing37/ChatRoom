@@ -6,10 +6,9 @@
 #include <sys/stat.h>
 #include <termios.h>
 #include <pthread.h>
-#include <readline/readline.h>
-#include <readline/history.h>
 #include <cstring>
 #include <cstdlib>
+
 
 class TcpServer {
   public:
@@ -53,3 +52,5 @@ private:
   std::filesystem::path oldCwd_;
   bool pasvReady_;
 };
+
+int start_server();

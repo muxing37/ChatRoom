@@ -9,18 +9,14 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 add_executable(server
     src/main_server.cpp
     src/server.cpp
-    src/client.cpp
     src/socket.cpp
-    src/ctrl.cpp
 )
 
 # client
 add_executable(client
     src/main_client.cpp
-    src/server.cpp
     src/client.cpp
     src/socket.cpp
-    src/ctrl.cpp
 )
 
 find_package(PkgConfig REQUIRED)
