@@ -1,5 +1,47 @@
 #include "server.h"
-#include <thread>
+
+class TcpServer {
+  public:
+  TcpServer();
+  ~TcpServer();
+
+  unsigned short getPort();
+
+  bool setListen(unsigned short port);
+
+  std::unique_ptr<TcpSocket> acceptConn();
+
+  private:
+  int listenfd_;
+};
+
+class FtpSession {
+public:
+
+  FtpSession(std::unique_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {
+    pasvReady_ = false;
+  }
+
+  void start();
+
+private:
+
+  bool run_cmd(std::vector<std::string> token);
+
+  std::vector<std::string> gettoken(std::string input);
+
+  bool doCWD(const std::string& s);
+  bool doPASV();
+
+
+private:
+  std::unique_ptr<TcpSocket> ctrlSock_;
+  std::unique_ptr<TcpSocket> pasv;
+  TcpServer dataServer;
+  std::filesystem::path cwd_;
+  std::filesystem::path oldCwd_;
+  bool pasvReady_;
+};
 
 TcpServer::TcpServer()
     : listenfd_(socket(AF_INET, SOCK_STREAM, 0)) {}
@@ -174,34 +216,6 @@ bool FtpSession::run_cmd(std::vector<std::string> token) {
     pasv->sendFile(path,offset);
     used = true;
   }
-        
-  // if(token[0]=="ls" || token[0]=="LIST") {
-  //     std::vector<char*> argv;
-  //     int argc=0;
-  //     now_path=now_path+"/ls";
-  //     argv.push_back(now_path.data());
-  //     argc++;
-  //     for(auto& s : token) {
-  //         if(s=="ls" || s=="LIST") continue;
-  //         if(s.size()>=2 && s.substr(0,2) == "./") {
-  //             s.erase(0,2);
-  //         }
-  //         argv.push_back(s.data());
-  //         argc++;
-  //     }
-  //     std::vector<std::string> ls_res;
-  //     ls_res=startls(argc,argv.data(),cwd_);
-
-  //     NetResult a;
-  //     a = pasv->sendMsg("start_ls");
-
-  //     for (const std::string& s : ls_res) {
-  //         pasv->sendMsg(s);
-  //     }
-  //     pasv->sendMsg("stop");
-
-  //     used = true;
-  // }
   if(used) pasvReady_=false;
   else pasv->sendMsg("not used");
   return used;

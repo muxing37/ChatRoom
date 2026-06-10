@@ -1,11 +1,18 @@
 #include "client.h"
 
 #define MAX_PATH 1024
-int running=0;
+// int running=0;
 
-struct oldcwd {
-    char path[MAX_PATH];
-    int set;
+class TcpClient {
+  public:
+  TcpClient();
+
+  TcpSocket* getSocket() const { return socket_.get(); }
+
+  bool connectToHost(const char* ip, unsigned short port);
+
+  private:
+  std::unique_ptr<TcpSocket> socket_;
 };
 
 std::string prompt;
@@ -14,9 +21,9 @@ void handle_SIGINT(int sig) {
 }
 
 void handle_SIGTSTP(int sig) {
-    if(running==1) {
-        printf("\n");
-    }
+    // if(running==1) {
+    printf("\n");
+    // }
 }
 
 void handle_signal(){
