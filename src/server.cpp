@@ -1,4 +1,17 @@
 #include "server.h"
+#include "user.h"
+
+class UidGenerator {
+public:
+  int get() {
+    return counter_.fetch_add(1);
+  }
+
+private:
+  std::atomic<int> counter_{10000};
+};
+
+UidGenerator get_uid;
 
 class TcpServer {
   public:
@@ -15,10 +28,10 @@ class TcpServer {
   int listenfd_;
 };
 
-class FtpSession {
+class Session {
 public:
 
-  FtpSession(std::unique_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {
+  Session(std::unique_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {
     pasvReady_ = false;
   }
 
@@ -30,7 +43,7 @@ private:
 
   std::vector<std::string> gettoken(std::string input);
 
-  bool doCWD(const std::string& s);
+  // bool doCWD(const std::string& s);
   bool doPASV();
 
 
@@ -91,25 +104,20 @@ std::unique_ptr<TcpSocket> TcpServer::acceptConn() {
   return std::make_unique<TcpSocket>(fd);
 }
 
-void FtpSession::start() {
+void Session::start() {
   while(true) {
+    // nlohmann::json j;
     std::string res;
-    cwd_ = std::filesystem::current_path();
-    oldCwd_ = cwd_;
-    // auto path=std::filesystem::current_path();
-    std::string now_path=cwd_.string();
-    Msgpack n_path;
-    n_path.type = MsgType::PATH_INFO;
-    n_path.msg = now_path;
-    ctrlSock_->sendMsgpack(n_path);
     ctrlSock_->recvMsg(res);
-    if(res != "yes") {
-      std::cout << res << std::endl;
-      continue;
-    }
-    std::cout << res << std::endl;
+    nlohmann::json j = nlohmann::json::parse(res);
+
+    ctrlSock_->sendMsg(std::to_string(get_uid.get()));
+
+    // max_uid++;
+
     break;
   }
+  
   while(true) {
     std::string msg;
     if(ctrlSock_->recvMsg(msg) != NetResult::OK) {
@@ -139,13 +147,13 @@ void FtpSession::start() {
       }
     }
 
-    if(token[0]=="cd" || token[0]=="CWD") {
-      if(token.size()>2) {
-        std::cout << "CWD: 参数太多" << std::endl;
-      }
-      doCWD(token[1]);
-      continue;
-    }
+    // if(token[0]=="cd" || token[0]=="CWD") {
+    //   if(token.size()>2) {
+    //     std::cout << "CWD: 参数太多" << std::endl;
+    //   }
+    //   doCWD(token[1]);
+    //   continue;
+    // }
 
     if(token[0]=="exit" || token[0]=="QUIT") {
       signal(SIGCHLD,SIG_IGN);
@@ -155,7 +163,7 @@ void FtpSession::start() {
 }
 
 
-bool FtpSession::run_cmd(std::vector<std::string> token) {
+bool Session::run_cmd(std::vector<std::string> token) {
   bool used = false;
   std::string now_path=cwd_.string();
   int status;
@@ -221,7 +229,7 @@ bool FtpSession::run_cmd(std::vector<std::string> token) {
   return used;
 }
 
-std::vector<std::string> FtpSession::gettoken(std::string input) {
+std::vector<std::string> Session::gettoken(std::string input) {
   std::vector<std::string> token;
   std::string current;
 
@@ -241,83 +249,83 @@ std::vector<std::string> FtpSession::gettoken(std::string input) {
   return token;
 }
 
-bool FtpSession::doCWD(const std::string& s) {
-  namespace fs = std::filesystem;
-  fs::path newPath;
-  while(true) {
-    if(s == "-") {
-      if(oldCwd_.empty()) {
-        std::cout << "OLDPWD not set\n";
-        ctrlSock_->sendMsg("OLDPWD not set");
-        return false;
-      }
-      std::cout << oldCwd_ << "\n";
-      ctrlSock_->sendMsg("ok");
-      std::swap(cwd_,oldCwd_);
-      break;
-    }
+// bool Session::doCWD(const std::string& s) {
+//   namespace fs = std::filesystem;
+//   fs::path newPath;
+//   while(true) {
+//     if(s == "-") {
+//       if(oldCwd_.empty()) {
+//         std::cout << "OLDPWD not set\n";
+//         ctrlSock_->sendMsg("OLDPWD not set");
+//         return false;
+//       }
+//       std::cout << oldCwd_ << "\n";
+//       ctrlSock_->sendMsg("ok");
+//       std::swap(cwd_,oldCwd_);
+//       break;
+//     }
 
-    if(!s.empty() && s[0] == '~') {
-      const char* home = getenv("HOME");
-      if(home == nullptr) {
-        ctrlSock_->sendMsg("home == nullptr");
-        return false;
-      }
-      newPath = fs::path(home);
-      if(s.size() > 1) {
-        newPath /= s.substr(1);
-      }
-    } else if(fs::path(s).is_absolute()) {
-      newPath = fs::path(s);
-    } else {
-      newPath = cwd_ / s;
-    }
+//     if(!s.empty() && s[0] == '~') {
+//       const char* home = getenv("HOME");
+//       if(home == nullptr) {
+//         ctrlSock_->sendMsg("home == nullptr");
+//         return false;
+//       }
+//       newPath = fs::path(home);
+//       if(s.size() > 1) {
+//         newPath /= s.substr(1);
+//       }
+//     } else if(fs::path(s).is_absolute()) {
+//       newPath = fs::path(s);
+//     } else {
+//       newPath = cwd_ / s;
+//     }
 
-    try {
-      newPath = fs::weakly_canonical(newPath);
-    }
-    catch(...) {
-      ctrlSock_->sendMsg("error");
-      return false;
-    }
+//     try {
+//       newPath = fs::weakly_canonical(newPath);
+//     }
+//     catch(...) {
+//       ctrlSock_->sendMsg("error");
+//       return false;
+//     }
 
-    if(!fs::exists(newPath)) {
-      std::cout << "No such file or directory\n";
-      ctrlSock_->sendMsg("No such file or directory");
-      return false;
-    }
+//     if(!fs::exists(newPath)) {
+//       std::cout << "No such file or directory\n";
+//       ctrlSock_->sendMsg("No such file or directory");
+//       return false;
+//     }
 
-    if(!fs::is_directory(newPath)) {
-      std::cout << "Not a directory\n";
-      ctrlSock_->sendMsg("Not a directory");
-      return false;
-    }
-    ctrlSock_->sendMsg("ok");
-    oldCwd_ = cwd_;
-    cwd_ = newPath;
-    break;
-  }
+//     if(!fs::is_directory(newPath)) {
+//       std::cout << "Not a directory\n";
+//       ctrlSock_->sendMsg("Not a directory");
+//       return false;
+//     }
+//     ctrlSock_->sendMsg("ok");
+//     oldCwd_ = cwd_;
+//     cwd_ = newPath;
+//     break;
+//   }
 
-  while(true) {
-    std::string res;
-    // auto path=std::filesystem::current_path();
-    std::string now_path=cwd_.string();
-    Msgpack n_path;
-    n_path.type = MsgType::PATH_INFO;
-    n_path.msg = now_path;
-    ctrlSock_->sendMsgpack(n_path);
-    ctrlSock_->recvMsg(res);
-    if(res != "yes") {
-      std::cout << res << std::endl;
-      continue;
-    }
-    std::cout << res << std::endl;
-    break;
-  }
-  return true;
-}
+//   while(true) {
+//     std::string res;
+//     // auto path=std::filesystem::current_path();
+//     std::string now_path=cwd_.string();
+//     Msgpack n_path;
+//     n_path.type = MsgType::PATH_INFO;
+//     n_path.msg = now_path;
+//     ctrlSock_->sendMsgpack(n_path);
+//     ctrlSock_->recvMsg(res);
+//     if(res != "yes") {
+//       std::cout << res << std::endl;
+//       continue;
+//     }
+//     std::cout << res << std::endl;
+//     break;
+//   }
+//   return true;
+// }
 
-bool FtpSession::doPASV() {
+bool Session::doPASV() {
   sockaddr_in addr;
   if(!dataServer.setListen(0)) {
     std::cerr << "data listen failed\n";
@@ -361,7 +369,7 @@ int start_server() {
       std::cout << "[PASS] client connected\n";
     }
     std::thread([sock = std::move(sock)]() mutable {
-        FtpSession session(std::move(sock));
+        Session session(std::move(sock));
         session.start();
       }
     ).detach();

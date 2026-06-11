@@ -9,5 +9,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <thread>
+#include <atomic>
+#include <mutex>
 
 int start_server();
