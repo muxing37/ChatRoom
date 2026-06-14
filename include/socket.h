@@ -46,6 +46,8 @@ class TcpSocket {
   NetResult sendFile(std::string& path,uint64_t offset);
   NetResult recvFile(std::string& path,uint64_t offset);
 
+  // int getfd();
+
   private:
   int sockfd_;
 };

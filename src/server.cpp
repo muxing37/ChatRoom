@@ -11,7 +11,32 @@ private:
   std::atomic<int> counter_{10000};
 };
 
+// class SessionManager {
+// public:
+//   void bindUser(int user_id,int fd);
+//   void unbindUser(int user_id);
+//   int getFd(int user_id);
+
+// private:
+//   std::unordered_map<int, int> user_to_fd_;
+//   std::mutex mtx_;
+// };
+class SessionManager {
+public:
+  void bindUser(int user_id, std::shared_ptr<TcpSocket> sock);
+  void unbindUser(int user_id);
+  std::shared_ptr<TcpSocket> getSock(int user_id);
+
+  template<typename Func>
+  void forEach(Func&& func);
+
+private:
+  std::unordered_map<int, std::shared_ptr<TcpSocket>> user_to_sock_;
+  std::mutex mtx_;
+};
+
 UidGenerator get_uid;
+SessionManager sessionManager;
 
 class TcpServer {
   public:
@@ -22,7 +47,7 @@ class TcpServer {
 
   bool setListen(unsigned short port);
 
-  std::unique_ptr<TcpSocket> acceptConn();
+  std::shared_ptr<TcpSocket> acceptConn();
 
   private:
   int listenfd_;
@@ -31,33 +56,67 @@ class TcpServer {
 class Session {
 public:
 
-  Session(std::unique_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {
+  Session(std::shared_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {
     pasvReady_ = false;
   }
 
   void start();
 
 private:
-
   bool run_cmd(std::vector<std::string> token);
 
   std::vector<std::string> gettoken(std::string input);
 
-  // bool doCWD(const std::string& s);
   bool doPASV();
 
-
 private:
-  std::unique_ptr<TcpSocket> ctrlSock_;
-  std::unique_ptr<TcpSocket> pasv;
+// int fd_;
+  std::shared_ptr<TcpSocket> ctrlSock_;
+  std::shared_ptr<TcpSocket> pasv;
   TcpServer dataServer;
   std::filesystem::path cwd_;
   std::filesystem::path oldCwd_;
   bool pasvReady_;
 };
 
+// void SessionManager::bindUser(int user_id,int fd) {
+//   std::lock_guard<std::mutex> lock(mtx_);
+//   user_to_fd_[user_id] = fd;
+// }
+
+void SessionManager::unbindUser(int user_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  user_to_sock_.erase(user_id);
+}
+
+// int SessionManager::getFd(int user_id) {
+//   std::lock_guard<std::mutex> lock(mtx_);
+//   auto it = user_to_fd_.find(user_id);
+//   if (it == user_to_fd_.end()) return -1;
+//   return it->second;
+// }
+void SessionManager::bindUser(int user_id,std::shared_ptr<TcpSocket> sock) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  user_to_sock_[user_id] = std::move(sock);
+}
+
+std::shared_ptr<TcpSocket> SessionManager::getSock(int user_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = user_to_sock_.find(user_id);
+  if (it == user_to_sock_.end()) return nullptr;
+  return it->second;
+}
+
+template<typename Func>
+void SessionManager::forEach(Func&& func) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  for (auto& [uid, sock] : user_to_sock_) {
+    func(uid, sock);
+  }
+}
+
 TcpServer::TcpServer()
-    : listenfd_(socket(AF_INET, SOCK_STREAM, 0)) {}
+  : listenfd_(socket(AF_INET, SOCK_STREAM, 0)) {}
 
 TcpServer::~TcpServer() {
   if (listenfd_ != -1) {
@@ -92,7 +151,7 @@ unsigned short TcpServer::getPort() {
   return ntohs(addr.sin_port);
 }
 
-std::unique_ptr<TcpSocket> TcpServer::acceptConn() {
+std::shared_ptr<TcpSocket> TcpServer::acceptConn() {
   sockaddr_in cliaddr;
   socklen_t len = sizeof(cliaddr);
   int fd = accept(listenfd_,(sockaddr*)&cliaddr,&len);
@@ -105,26 +164,28 @@ std::unique_ptr<TcpSocket> TcpServer::acceptConn() {
 }
 
 void Session::start() {
+  User usr;
+  std::string msg;
   while(true) {
     // nlohmann::json j;
     std::string res;
     ctrlSock_->recvMsg(res);
     nlohmann::json j = nlohmann::json::parse(res);
-
-    ctrlSock_->sendMsg(std::to_string(get_uid.get()));
-
-    // max_uid++;
-
+    usr.uid = get_uid.get();
+    ctrlSock_->sendMsg(std::to_string(usr.uid));
+    sessionManager.bindUser(usr.uid,ctrlSock_);
     break;
   }
   
   while(true) {
-    std::string msg;
     if(ctrlSock_->recvMsg(msg) != NetResult::OK) {
       std::cout << "[INFO] client disconnected or recv failed\n";
     }
     std::cout << "[INFO] recv: " << msg << "\n";
-
+    // sessionManager.forEach();
+    sessionManager.forEach([&](int uid, auto sock){
+      sock->sendMsg(msg);
+    });
     std::vector<std::string> token;
     token=gettoken(msg);
 
@@ -134,7 +195,8 @@ void Session::start() {
       ctrlSock_->sendMsg("请输入文件名");
       continue;
     } else {
-      ctrlSock_->sendMsg("yes");
+      // ctrlSock_->sendMsg("yes");
+      continue;
     }
 
     if(token[0]=="PASV" || pasvReady_==true) {
@@ -161,7 +223,6 @@ void Session::start() {
     }
   }
 }
-
 
 bool Session::run_cmd(std::vector<std::string> token) {
   bool used = false;
@@ -249,82 +310,6 @@ std::vector<std::string> Session::gettoken(std::string input) {
   return token;
 }
 
-// bool Session::doCWD(const std::string& s) {
-//   namespace fs = std::filesystem;
-//   fs::path newPath;
-//   while(true) {
-//     if(s == "-") {
-//       if(oldCwd_.empty()) {
-//         std::cout << "OLDPWD not set\n";
-//         ctrlSock_->sendMsg("OLDPWD not set");
-//         return false;
-//       }
-//       std::cout << oldCwd_ << "\n";
-//       ctrlSock_->sendMsg("ok");
-//       std::swap(cwd_,oldCwd_);
-//       break;
-//     }
-
-//     if(!s.empty() && s[0] == '~') {
-//       const char* home = getenv("HOME");
-//       if(home == nullptr) {
-//         ctrlSock_->sendMsg("home == nullptr");
-//         return false;
-//       }
-//       newPath = fs::path(home);
-//       if(s.size() > 1) {
-//         newPath /= s.substr(1);
-//       }
-//     } else if(fs::path(s).is_absolute()) {
-//       newPath = fs::path(s);
-//     } else {
-//       newPath = cwd_ / s;
-//     }
-
-//     try {
-//       newPath = fs::weakly_canonical(newPath);
-//     }
-//     catch(...) {
-//       ctrlSock_->sendMsg("error");
-//       return false;
-//     }
-
-//     if(!fs::exists(newPath)) {
-//       std::cout << "No such file or directory\n";
-//       ctrlSock_->sendMsg("No such file or directory");
-//       return false;
-//     }
-
-//     if(!fs::is_directory(newPath)) {
-//       std::cout << "Not a directory\n";
-//       ctrlSock_->sendMsg("Not a directory");
-//       return false;
-//     }
-//     ctrlSock_->sendMsg("ok");
-//     oldCwd_ = cwd_;
-//     cwd_ = newPath;
-//     break;
-//   }
-
-//   while(true) {
-//     std::string res;
-//     // auto path=std::filesystem::current_path();
-//     std::string now_path=cwd_.string();
-//     Msgpack n_path;
-//     n_path.type = MsgType::PATH_INFO;
-//     n_path.msg = now_path;
-//     ctrlSock_->sendMsgpack(n_path);
-//     ctrlSock_->recvMsg(res);
-//     if(res != "yes") {
-//       std::cout << res << std::endl;
-//       continue;
-//     }
-//     std::cout << res << std::endl;
-//     break;
-//   }
-//   return true;
-// }
-
 bool Session::doPASV() {
   sockaddr_in addr;
   if(!dataServer.setListen(0)) {
@@ -351,6 +336,7 @@ bool Session::doPASV() {
   return true;
 }
 
+
 int start_server() {
   chdir(getenv("HOME"));
   TcpServer server;
@@ -362,6 +348,7 @@ int start_server() {
   std::cout << "[INFO] server listening on port 2100...\n";
 
   while(true) {
+    std::cout << "[INFO] server listening on port 2100...\n";
     auto sock = server.acceptConn();
     if(!sock) {
       continue;

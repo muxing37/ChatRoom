@@ -1,5 +1,6 @@
 #include "client.h"
 #include "user.h"
+#include <thread>
 
 #define MAX_PATH 1024
 // int running=0;
@@ -62,6 +63,37 @@ bool TcpClient::connectToHost(const char* ip, unsigned short port) {
     return true;
 }
 
+void recvthread(TcpSocket& sock) {
+    while(true) {
+        std::string res;
+        sock.recvMsg(res);
+        std::cout << "\n" << res << "\n" <<std::flush;
+    }
+}
+
+void sendthread(TcpSocket& sock) {
+    while(true) {
+        char *inp=NULL;
+        inp=readline(prompt.c_str());
+        if(inp == NULL) {
+            free(inp);
+            continue;
+        }
+        std::string input(inp);
+        free(inp);
+        if(input == "/exit") {
+            signal(SIGCHLD,SIG_IGN);
+            rl_clear_history();
+            break;
+        }
+        if(input.empty()) {
+            continue;
+        } else {
+            sock.sendMsg(input);
+        }
+    }
+}
+
 int start_client() {
     handle_signal();
 
@@ -102,39 +134,13 @@ int start_client() {
 
         break;
     }
+    std::thread t1(sendthread,std::ref(*sock));
+    std::thread t2(recvthread,std::ref(*sock));
+
+    t1.join();
+    t2.join();
 
     while(true) {
-        char *inp=NULL;
-        inp=readline(prompt.c_str());
-        if(inp==NULL) {
-            free(inp);
-            continue;
-        }
-        std::string input(inp);
-        free(inp);
-
-        // if(input.size()==0 || input.empty()) {
-        //     continue;
-        // }
-
-        // add_history(input.c_str());
-        if(input.empty()) {
-            continue;
-        } else {
-            sock->sendMsg(input);
-        }
-
-        std::string res;
-        sock->recvMsg(res);
-        if(res != "yes") {
-            std::cout << res << std::endl;
-            continue;
-        }
-        
-        // if(pasving == false && (input.size() >= 4 && (input.substr(0,4) == "RETR" || input.substr(0,4) == "STOR" || input.substr(0,4) == "LIST"))) {
-        //     std::cout << "请使用 PASV 建立数据连接" << std::endl;
-        //     continue;
-        // }
 
         // if(pasving) {
         //     std::string msa;
@@ -193,29 +199,6 @@ int start_client() {
         //     }
         // }
 
-        // if((input.size()>=2 && input.substr(0, 2) == "cd") || (input.size()>=3 && input.substr(0,3) == "CWD")) {
-        //     while(true) {
-        //         std::string now_path;
-        //         Msgpack n_path;
-        //         std::string res;
-        //         sock->recvMsg(res);
-        //         if(res != "ok") {
-        //             std::cout << res <<std::endl;
-        //             break;
-        //         }
-        //         sock->recvMsgpack(n_path);
-        //         if(n_path.type != MsgType::PATH_INFO) {
-        //             sock->sendMsg("unexpected");
-        //             continue;
-        //         }else {
-        //             sock->sendMsg("yes");
-        //         }
-        //         prompt.clear();
-        //         prompt="ftp client >> server:\033[34m" + n_path.msg + "\033[0m ";
-        //         break;
-        //     }
-        // }
-
         // if(input=="PASV" && pasving==false) {
         //     pasving=true;
         //     std::string reply;
@@ -246,11 +229,11 @@ int start_client() {
         //     continue;
         // }
 
-        if(input=="exit") {
-            signal(SIGCHLD,SIG_IGN);
-            rl_clear_history();
+        // if(input=="exit") {
+            // signal(SIGCHLD,SIG_IGN);
+            // rl_clear_history();
             break;
-        }
+        // }
     }
     return 0;
 }
