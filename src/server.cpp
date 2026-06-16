@@ -99,25 +99,36 @@ void Session::start() {
   while(true) {
     // nlohmann::json j;
     std::string res;
-    ctrlSock_->recvMsg(res);
-
+    if(ctrlSock_->recvMsg(res) != NetResult::OK) return;
+    if(res.empty()) {
+      NetResult ret = ctrlSock_->sendMsg("error");
+      if(ret != NetResult::OK) {
+        // exit(0);
+        return;
+      } else {
+        continue;
+      }
+    }
     nlohmann::json j = nlohmann::json::parse(res);
     if(j["type"] == "register") {
       // usr.uid = get_uid.get();
       if(usrManager.regis(j["username"],j["password"],usr.uid)) {
         ctrlSock_->sendMsg(std::to_string(usr.uid));
+        
         break;
       } else {
         ctrlSock_->sendMsg("error");
+        continue;
       }
       // sessionManager.bindUser(usr.uid,ctrlSock_);
     } else if(j["type"] == "login") {
       if(usrManager.login(j["username"],j["password"],usr.uid)) {
         ctrlSock_->sendMsg(std::to_string(usr.uid));
-        std::cout << "asdw";
+
         break;
       } else {
         ctrlSock_->sendMsg("error");
+        continue;
       }
     } else {
 
@@ -163,7 +174,7 @@ void Session::start() {
 
     if(token[0]=="/exit" || token[0]=="QUIT") {
       // signal(SIGCHLD,SIG_IGN);
-      std::cout << "111\n";
+      // std::cout << "111\n";
       ctrlSock_->~TcpSocket();
       sessionManager.unbindUser(usr.uid);
       break;

@@ -142,7 +142,12 @@ int start_client() {
         sock->sendMsg(j.dump());
         std::string id;
         sock->recvMsg(id);
-        if(id == "error") continue;
+        if(id == "error") {
+            std::cout << "用户名已存在，请重试\n";
+            usr.username.clear();
+            usr.password.clear();
+            continue;
+        }
         usr.uid = std::stoi(id);
 
         prompt.clear();
@@ -169,7 +174,12 @@ int start_client() {
         sock->sendMsg(j.dump());
         std::string id;
         sock->recvMsg(id);
-        if(id == "error") continue;
+        if(id == "error") {
+            std::cout << "用户名或密码错误，请重试\n";
+            usr.username.clear();
+            usr.password.clear();
+            continue;
+        }
         usr.uid = std::stoi(id);
 
         prompt.clear();
