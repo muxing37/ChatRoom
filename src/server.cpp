@@ -1,41 +1,8 @@
 #include "server.h"
 #include "user.h"
+#include "manager.h"
 
-class UidGenerator {
-public:
-  int get() {
-    return counter_.fetch_add(1);
-  }
-
-private:
-  std::atomic<int> counter_{10000};
-};
-
-// class SessionManager {
-// public:
-//   void bindUser(int user_id,int fd);
-//   void unbindUser(int user_id);
-//   int getFd(int user_id);
-
-// private:
-//   std::unordered_map<int, int> user_to_fd_;
-//   std::mutex mtx_;
-// };
-class SessionManager {
-public:
-  void bindUser(int user_id, std::shared_ptr<TcpSocket> sock);
-  void unbindUser(int user_id);
-  std::shared_ptr<TcpSocket> getSock(int user_id);
-
-  template<typename Func>
-  void forEach(Func&& func);
-
-private:
-  std::unordered_map<int, std::shared_ptr<TcpSocket>> user_to_sock_;
-  std::mutex mtx_;
-};
-
-UidGenerator get_uid;
+UsrManager usrManager;
 SessionManager sessionManager;
 
 class TcpServer {
@@ -70,7 +37,6 @@ private:
   bool doPASV();
 
 private:
-// int fd_;
   std::shared_ptr<TcpSocket> ctrlSock_;
   std::shared_ptr<TcpSocket> pasv;
   TcpServer dataServer;
@@ -78,42 +44,6 @@ private:
   std::filesystem::path oldCwd_;
   bool pasvReady_;
 };
-
-// void SessionManager::bindUser(int user_id,int fd) {
-//   std::lock_guard<std::mutex> lock(mtx_);
-//   user_to_fd_[user_id] = fd;
-// }
-
-void SessionManager::unbindUser(int user_id) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  user_to_sock_.erase(user_id);
-}
-
-// int SessionManager::getFd(int user_id) {
-//   std::lock_guard<std::mutex> lock(mtx_);
-//   auto it = user_to_fd_.find(user_id);
-//   if (it == user_to_fd_.end()) return -1;
-//   return it->second;
-// }
-void SessionManager::bindUser(int user_id,std::shared_ptr<TcpSocket> sock) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  user_to_sock_[user_id] = std::move(sock);
-}
-
-std::shared_ptr<TcpSocket> SessionManager::getSock(int user_id) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  auto it = user_to_sock_.find(user_id);
-  if (it == user_to_sock_.end()) return nullptr;
-  return it->second;
-}
-
-template<typename Func>
-void SessionManager::forEach(Func&& func) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  for (auto& [uid, sock] : user_to_sock_) {
-    func(uid, sock);
-  }
-}
 
 TcpServer::TcpServer()
   : listenfd_(socket(AF_INET, SOCK_STREAM, 0)) {}
@@ -170,22 +100,44 @@ void Session::start() {
     // nlohmann::json j;
     std::string res;
     ctrlSock_->recvMsg(res);
+
     nlohmann::json j = nlohmann::json::parse(res);
-    usr.uid = get_uid.get();
-    ctrlSock_->sendMsg(std::to_string(usr.uid));
-    sessionManager.bindUser(usr.uid,ctrlSock_);
-    break;
+    if(j["type"] == "register") {
+      // usr.uid = get_uid.get();
+      if(usrManager.regis(j["username"],j["password"],usr.uid)) {
+        ctrlSock_->sendMsg(std::to_string(usr.uid));
+        break;
+      } else {
+        ctrlSock_->sendMsg("error");
+      }
+      // sessionManager.bindUser(usr.uid,ctrlSock_);
+    } else if(j["type"] == "login") {
+      if(usrManager.login(j["username"],j["password"],usr.uid)) {
+        ctrlSock_->sendMsg(std::to_string(usr.uid));
+        std::cout << "asdw";
+        break;
+      } else {
+        ctrlSock_->sendMsg("error");
+      }
+    } else {
+
+    }
+    // break;
   }
   
   while(true) {
     if(ctrlSock_->recvMsg(msg) != NetResult::OK) {
       std::cout << "[INFO] client disconnected or recv failed\n";
+      break;
     }
-    std::cout << "[INFO] recv: " << msg << "\n";
+    std::cout << "recv: " << msg << "\n";
     // sessionManager.forEach();
-    sessionManager.forEach([&](int uid, auto sock){
-      sock->sendMsg(msg);
-    });
+    if(!(msg.empty()) && msg[0] != '/') {
+      sessionManager.forEach([&](int uid,auto sock){
+        sock->sendMsg(msg);
+      });
+      continue;
+    }
     std::vector<std::string> token;
     token=gettoken(msg);
 
@@ -196,7 +148,7 @@ void Session::start() {
       continue;
     } else {
       // ctrlSock_->sendMsg("yes");
-      continue;
+      // continue;
     }
 
     if(token[0]=="PASV" || pasvReady_==true) {
@@ -209,16 +161,11 @@ void Session::start() {
       }
     }
 
-    // if(token[0]=="cd" || token[0]=="CWD") {
-    //   if(token.size()>2) {
-    //     std::cout << "CWD: 参数太多" << std::endl;
-    //   }
-    //   doCWD(token[1]);
-    //   continue;
-    // }
-
-    if(token[0]=="exit" || token[0]=="QUIT") {
-      signal(SIGCHLD,SIG_IGN);
+    if(token[0]=="/exit" || token[0]=="QUIT") {
+      // signal(SIGCHLD,SIG_IGN);
+      std::cout << "111\n";
+      ctrlSock_->~TcpSocket();
+      sessionManager.unbindUser(usr.uid);
       break;
     }
   }

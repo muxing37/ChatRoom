@@ -10,6 +10,7 @@ add_executable(server
     src/main_server.cpp
     src/server.cpp
     src/socket.cpp
+    src/manager.cpp
 )
 
 # client

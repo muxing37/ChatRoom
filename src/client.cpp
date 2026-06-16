@@ -66,7 +66,8 @@ bool TcpClient::connectToHost(const char* ip, unsigned short port) {
 void recvthread(TcpSocket& sock) {
     while(true) {
         std::string res;
-        sock.recvMsg(res);
+        NetResult ret = sock.recvMsg(res);
+        if(ret != NetResult::OK) break;
         std::cout << "\n" << res << "\n" <<std::flush;
     }
 }
@@ -81,22 +82,21 @@ void sendthread(TcpSocket& sock) {
         }
         std::string input(inp);
         free(inp);
-        if(input == "/exit") {
-            signal(SIGCHLD,SIG_IGN);
-            rl_clear_history();
-            break;
-        }
         if(input.empty()) {
             continue;
         } else {
             sock.sendMsg(input);
         }
+        if(input == "/exit") {
+            // signal(SIGCHLD,SIG_IGN);
+            rl_clear_history();
+            break;
+        }
     }
 }
 
 int start_client() {
-    handle_signal();
-
+    // handle_signal();
     TcpClient client;
     if(!client.connectToHost("127.0.0.1", 2100)) {
         std::cerr << "[FAIL] connectToHost failed\n";
@@ -117,16 +117,32 @@ int start_client() {
     TcpSocket* pasv;
 
     User usr;
+    std::string choice;
+    while(choice != "/register" && choice != "/login") {
+        std::cout << "请注册（/register）或登录（/login） >> " ;
+        std::cin >> choice;
+    }
 
-    while(true) {
-        std::cout << "请输入用户名:\n";
-        std::cin >> usr.username ;
+    while(choice == "/register") {
+    // while(true) {
+        if(usr.username.empty()) {
+            std::cout << "请输入用户名:\n";
+            std::cin >> usr.username ;
+            if(usr.username.empty()) continue;
+        }
+        if(usr.password.empty()) {
+            std::cout << "请输入密码:\n";
+            std::cin >> usr.password;
+            if(usr.username.empty()) continue;
+        }
         nlohmann::json j;
-        j["type"] = "login" ;
-        j["username"] = usr.username ;
+        j["type"] = "register";
+        j["username"] = usr.username;
+        j["password"] = usr.password;
         sock->sendMsg(j.dump());
         std::string id;
         sock->recvMsg(id);
+        if(id == "error") continue;
         usr.uid = std::stoi(id);
 
         prompt.clear();
@@ -134,6 +150,34 @@ int start_client() {
 
         break;
     }
+
+    while(choice == "/login") {
+        if(usr.username.empty()) {
+            std::cout << "请输入用户名:\n";
+            std::cin >> usr.username ;
+            if(usr.username.empty()) continue;
+        }
+        if(usr.password.empty()) {
+            std::cout << "请输入密码:\n";
+            std::cin >> usr.password;
+            if(usr.username.empty()) continue;
+        }
+        nlohmann::json j;
+        j["type"] = "login" ;
+        j["username"] = usr.username;
+        j["password"] = usr.password;
+        sock->sendMsg(j.dump());
+        std::string id;
+        sock->recvMsg(id);
+        if(id == "error") continue;
+        usr.uid = std::stoi(id);
+
+        prompt.clear();
+        prompt = usr.username + " " + id + " >> ";
+
+        break;
+    }
+
     std::thread t1(sendthread,std::ref(*sock));
     std::thread t2(recvthread,std::ref(*sock));
 
