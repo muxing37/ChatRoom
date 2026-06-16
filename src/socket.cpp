@@ -4,6 +4,7 @@ TcpSocket::TcpSocket(int sockfd) : sockfd_(sockfd) {}
 
 TcpSocket::~TcpSocket() {
   close(sockfd_);
+  sockfd_ = -1;
 }
 
 uint64_t htonll(uint64_t num) {
