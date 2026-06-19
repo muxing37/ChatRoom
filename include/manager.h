@@ -1,6 +1,7 @@
 #pragma once
 #include "socket.h"
 #include "user.h"
+#include <fstream>
 #include <termios.h>
 #include <pthread.h>
 #include <cstring>
@@ -12,6 +13,10 @@
 
 class UidGenerator {
 public:
+  void init(int start) {
+    counter_.store(start);
+  }
+
   int get() {
     return counter_.fetch_add(1);
   }
@@ -22,13 +27,19 @@ private:
 
 class UsrManager {
 public:
-    bool regis(const std::string& username,const std::string& password,int& out_uid);
-    bool login(const std::string& username,const std::string& password,int& out_uid);
+  bool regis(const std::string& username,const std::string& password,int uid);
+  bool login(const std::string& username,const std::string& password,int& out_uid);
+  
+  bool load(const std::string& path);
+  bool save(const std::string& path);
 
+  int getMaxUid();
+  User* getUser(int uid);
+    
 private:
-    std::unordered_map<int,User> uid_map_;
-    std::unordered_map<std::string,int> name_map_;
-    std::mutex mtx_;
+  std::unordered_map<int,User> uid_map_;
+  std::unordered_map<std::string,int> name_map_;
+  std::mutex mtx_;
 };
 
 class SessionManager {

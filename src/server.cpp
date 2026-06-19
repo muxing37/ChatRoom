@@ -1,9 +1,11 @@
 #include "server.h"
 #include "user.h"
 #include "manager.h"
-
+// #define SAVEPATH ./data
+std::string SAVEPATH = "./data/usr.json";
 UsrManager usrManager;
 SessionManager sessionManager;
+UidGenerator get_uid;
 
 class TcpServer {
   public:
@@ -94,7 +96,9 @@ std::shared_ptr<TcpSocket> TcpServer::acceptConn() {
 }
 
 void Session::start() {
-  User usr;
+  // User usr;
+  int uid;
+  User* usr;
   std::string msg;
   while(true) {
     // nlohmann::json j;
@@ -111,10 +115,11 @@ void Session::start() {
     }
     nlohmann::json j = nlohmann::json::parse(res);
     if(j["type"] == "register") {
-      // usr.uid = get_uid.get();
-      if(usrManager.regis(j["username"],j["password"],usr.uid)) {
-        ctrlSock_->sendMsg(std::to_string(usr.uid));
-        
+      uid = get_uid.get();
+      if(usrManager.regis(j["username"],j["password"],uid)) {
+        ctrlSock_->sendMsg(std::to_string(uid));
+        usr = usrManager.getUser(uid);
+        usrManager.save(SAVEPATH);
         break;
       } else {
         ctrlSock_->sendMsg("error");
@@ -122,9 +127,9 @@ void Session::start() {
       }
       // sessionManager.bindUser(usr.uid,ctrlSock_);
     } else if(j["type"] == "login") {
-      if(usrManager.login(j["username"],j["password"],usr.uid)) {
-        ctrlSock_->sendMsg(std::to_string(usr.uid));
-
+      if(usrManager.login(j["username"],j["password"],uid)) {
+        ctrlSock_->sendMsg(std::to_string(uid));
+        usr = usrManager.getUser(uid);
         break;
       } else {
         ctrlSock_->sendMsg("error");
@@ -137,6 +142,9 @@ void Session::start() {
   }
   
   while(true) {
+    // std::cout << usr->uid << std::endl;
+    // std::cout << usr->username << std::endl;
+    sessionManager.bindUser(usr->uid,ctrlSock_);
     if(ctrlSock_->recvMsg(msg) != NetResult::OK) {
       std::cout << "[INFO] client disconnected or recv failed\n";
       break;
@@ -176,7 +184,7 @@ void Session::start() {
       // signal(SIGCHLD,SIG_IGN);
       // std::cout << "111\n";
       ctrlSock_->~TcpSocket();
-      sessionManager.unbindUser(usr.uid);
+      sessionManager.unbindUser(usr->uid);
       break;
     }
   }
@@ -296,7 +304,11 @@ bool Session::doPASV() {
 
 
 int start_server() {
-  chdir(getenv("HOME"));
+  std::filesystem::create_directories("./data");
+  // chdir(getenv("HOME"));
+  usrManager.load(SAVEPATH);
+  int max_uid = usrManager.getMaxUid();
+  get_uid.init(max_uid + 1);
   TcpServer server;
 
   if(!server.setListen(2100)) {

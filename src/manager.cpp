@@ -1,16 +1,15 @@
 #include "manager.h"
 
 // bool UsrManager::regis()
-UidGenerator get_uid;
 
-bool UsrManager::regis(const std::string& username,const std::string& password,int& out_uid) {
+bool UsrManager::regis(const std::string& username,const std::string& password,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
 
   if (name_map_.count(username)) {
     return false;
   }
 
-  int uid = get_uid.get();
+  // int uid = get_uid.get();
   User user{
     uid,
     username,
@@ -20,7 +19,7 @@ bool UsrManager::regis(const std::string& username,const std::string& password,i
   uid_map_[uid] = user;
   name_map_[username] = uid;
 
-  out_uid = uid;
+  // out_uid = uid;
   return true;
 }
 
@@ -44,6 +43,72 @@ bool UsrManager::login(const std::string& username,const std::string& password,i
 
   out_uid = uid;
   return true;
+}
+
+bool UsrManager::load(const std::string& path) {
+  std::ifstream ifs(path);
+
+  if(!ifs.is_open()) return false;
+
+  nlohmann::json j;
+  ifs >> j;
+
+  uid_map_.clear();
+  name_map_.clear();
+
+  for(auto& item : j) {
+    User user;
+
+    user.uid = item["uid"];
+    user.username = item["username"];
+    user.password = item["password"];
+
+    uid_map_[user.uid] = user;
+    name_map_[user.username] = user.uid;
+  }
+
+  return true;
+}
+
+bool UsrManager::save(const std::string& path) {
+  nlohmann::json j = nlohmann::json::array();
+
+  for(auto& [uid, user] : uid_map_) {
+    j.push_back({
+      {"uid",user.uid},
+      {"username",user.username},
+      {"password",user.password}
+    });
+  }
+
+  std::ofstream ofs(path);
+
+  if(!ofs.is_open()) return false;
+
+  ofs << j.dump(4);
+
+  return true;
+}
+
+int UsrManager::getMaxUid() {
+  int max_uid = 10000;
+
+  for(auto& [uid, user] : uid_map_) {
+    if(uid > max_uid) max_uid = uid;
+  }
+
+  return max_uid;
+}
+
+User* UsrManager::getUser(int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  auto iter = uid_map_.find(uid);
+  if(iter == uid_map_.end()) {
+    return nullptr;
+  }
+
+  return &iter->second;
 }
 
 void SessionManager::unbindUser(int user_id) {
