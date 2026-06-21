@@ -1,7 +1,7 @@
 #include "server.h"
 #include "user.h"
 #include "manager.h"
-// #define SAVEPATH ./data
+
 std::string SAVEPATH = "./data/usr.json";
 UsrManager usrManager;
 SessionManager sessionManager;

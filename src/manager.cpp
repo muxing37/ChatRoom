@@ -111,6 +111,76 @@ User* UsrManager::getUser(int uid) {
   return &iter->second;
 }
 
+std::vector<int> FriendManager::list(int uid) {
+
+}
+
+int FriendManager::add(int uid1,int uid2) {
+
+}
+
+int FriendManager::del(int uid1,int uid2) {
+
+}
+
+int FriendManager::apply(int uid) {
+
+}
+
+bool FriendManager::load(const std::string& path) {
+
+}
+
+bool FriendManager::save(const std::string& path) {
+  
+}
+
+void MenuManager::show(ClientState state) {
+  const std::vector<std::string>* menu = nullptr;
+  std::string title;
+
+  switch(state) {
+    case ClientState::LOGIN:
+      menu = &menu_login_;
+      title = "登录菜单";
+      break;
+
+    case ClientState::MAIN_MENU:
+      menu = &menu_main_;
+      title = "主菜单";
+      break;
+
+    case ClientState::FRIEND_MENU:
+      menu = &menu_friend_;
+      title = "好友管理";
+      break;
+
+    case ClientState::PRIVATE_CHAT:
+      menu = &menu_private_chat_;
+      title = "私聊";
+      break;
+
+    case ClientState::GROUP_MENU:
+      menu = &menu_group_;
+      title = "群聊";
+      break;
+
+    default:
+      return;
+  }
+
+  std::cout << "\n";
+  std::cout << "====================\n";
+  std::cout << "      " << title << '\n';
+  std::cout << "====================\n\n";
+
+  for (size_t i = 0; i < menu->size(); ++i) {
+    std::cout << i + 1 << ". " << (*menu)[i] << '\n';
+  }
+
+  std::cout << "\n请选择: ";
+}
+
 void SessionManager::unbindUser(int user_id) {
   std::lock_guard<std::mutex> lock(mtx_);
   user_to_sock_.erase(user_id);

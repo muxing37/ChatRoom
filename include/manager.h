@@ -9,6 +9,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <unordered_set>
 #include <memory>
 
 class UidGenerator {
@@ -40,6 +41,64 @@ private:
   std::unordered_map<int,User> uid_map_;
   std::unordered_map<std::string,int> name_map_;
   std::mutex mtx_;
+};
+
+class FriendManager {
+public:
+  std::vector<int> list(int uid);
+  int add(int uid1,int uid2);
+  int del(int uid1,int uid2);
+  int apply(int uid);
+
+  bool load(const std::string& path);
+  bool save(const std::string& path);
+
+private:
+  std::unordered_map<int,std::unordered_set<int>> friends;
+  std::mutex mtx_;
+};
+
+class MenuManager {
+public:
+  void show(ClientState state);
+
+private:
+  const std::vector<std::string> menu_login_ = {
+    "登录",
+    "注册",
+    "退出"
+  };
+
+  const std::vector<std::string> menu_main_ = {
+    "好友管理",
+    "私聊",
+    "群聊",
+    "个人信息",
+    "退出登录"
+  };
+
+  const std::vector<std::string> menu_friend_ = {
+    "查看好友列表",
+    "添加好友",
+    "删除好友",
+    "好友申请",
+    "返回主菜单"
+  };
+
+  const std::vector<std::string> menu_private_chat_ = {
+    "选择好友聊天",
+    "查看聊天记录",
+    "返回主菜单"
+  };
+
+  const std::vector<std::string> menu_group_ = {
+    "查看群聊",
+    "创建群聊",
+    "加入群聊",
+    "退出群聊",
+    "返回主菜单"
+  };
+
 };
 
 class SessionManager {

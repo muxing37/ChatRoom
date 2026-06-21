@@ -1,9 +1,11 @@
 #include "client.h"
 #include "user.h"
+#include "manager.h"
 #include <thread>
 
 #define MAX_PATH 1024
 // int running=0;
+MenuManager menu;
 
 class TcpClient {
   public:
@@ -74,24 +76,45 @@ void recvthread(TcpSocket& sock) {
 
 void sendthread(TcpSocket& sock) {
     while(true) {
-        char *inp=NULL;
-        inp=readline(prompt.c_str());
-        if(inp == NULL) {
-            free(inp);
-            continue;
+        int choice;
+        menu.show(ClientState::MAIN_MENU);
+        std::cin >> choice;
+        if(choice == 1) {
+            menu.show(ClientState::FRIEND_MENU);
+            std::cin >>choice;
+            if(choice == 1) {
+                //friend_list();
+            } else if(choice == 2) {
+                //friend_add();
+            } else if(choice == 3) {
+                //删除
+            } else if(choice == 4) {
+                //好友申请
+            } else if(choice == 5) {
+                continue;
+            }
         }
-        std::string input(inp);
-        free(inp);
-        if(input.empty()) {
-            continue;
-        } else {
-            sock.sendMsg(input);
-        }
-        if(input == "/exit") {
-            // signal(SIGCHLD,SIG_IGN);
-            rl_clear_history();
-            break;
-        }
+
+        // while(true) {
+        //     char *inp=NULL;
+        //     inp=readline(prompt.c_str());
+        //     if(inp == NULL) {
+        //         free(inp);
+        //         continue;
+        //     }
+        //     std::string input(inp);
+        //     free(inp);
+        //     if(input.empty()) {
+        //         continue;
+        //     } else {
+        //         sock.sendMsg(input);
+        //     }
+        //     if(input == "/exit") {
+        //         // signal(SIGCHLD,SIG_IGN);
+        //         rl_clear_history();
+        //         break;
+        //     }
+        // }
     }
 }
 
@@ -118,12 +141,13 @@ int start_client() {
 
     User usr;
     std::string choice;
-    while(choice != "/register" && choice != "/login") {
-        std::cout << "请注册（/register）或登录（/login） >> " ;
+    while(choice != "1" && choice != "2") {
+        // std::cout << "请注册（/register）或登录（/login） >> " ;
+        menu.show(ClientState::LOGIN);
         std::cin >> choice;
     }
 
-    while(choice == "/register") {
+    while(choice == "2") {
     // while(true) {
         if(usr.username.empty()) {
             std::cout << "请输入用户名:\n";
@@ -156,7 +180,7 @@ int start_client() {
         break;
     }
 
-    while(choice == "/login") {
+    while(choice == "1") {
         if(usr.username.empty()) {
             std::cout << "请输入用户名:\n";
             std::cin >> usr.username ;

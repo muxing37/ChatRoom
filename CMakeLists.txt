@@ -18,6 +18,7 @@ add_executable(client
     src/main_client.cpp
     src/client.cpp
     src/socket.cpp
+    src/manager.cpp
 )
 
 find_package(PkgConfig REQUIRED)
