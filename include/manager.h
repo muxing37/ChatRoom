@@ -46,15 +46,26 @@ private:
 class FriendManager {
 public:
   std::vector<int> list(int uid);
-  int add(int uid1,int uid2);
+  // int add(int uid1,int uid2);
   int del(int uid1,int uid2);
-  int apply(int uid);
+  int require(int uid1,int uid2);
+  int apply(int uid1,int uid2);
+  int regect(int uid1,int uid2);
 
   bool load(const std::string& path);
   bool save(const std::string& path);
 
 private:
+  // struct Request{
+  //   int from;
+  //   int to;
+  //   int status;
+  //   std::string msg;
+  // };
+
   std::unordered_map<int,std::unordered_set<int>> friends;
+  std::unordered_map<int,std::unordered_set<int>> requests;
+  // std::unordered_map<int,std::vector<Request>> requests;
   std::mutex mtx_;
 };
 
@@ -81,7 +92,7 @@ private:
     "查看好友列表",
     "添加好友",
     "删除好友",
-    "好友申请",
+    "查看好友申请",
     "返回主菜单"
   };
 

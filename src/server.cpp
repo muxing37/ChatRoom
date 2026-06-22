@@ -2,7 +2,9 @@
 #include "user.h"
 #include "manager.h"
 
-std::string SAVEPATH = "./data/usr.json";
+const std::string SAVEPATH = "./data";
+const std::string USRDATA = SAVEPATH + "/usrdata.json";
+// std::string 
 UsrManager usrManager;
 SessionManager sessionManager;
 UidGenerator get_uid;
@@ -119,7 +121,7 @@ void Session::start() {
       if(usrManager.regis(j["username"],j["password"],uid)) {
         ctrlSock_->sendMsg(std::to_string(uid));
         usr = usrManager.getUser(uid);
-        usrManager.save(SAVEPATH);
+        usrManager.save(USRDATA);
         break;
       } else {
         ctrlSock_->sendMsg("error");
@@ -304,9 +306,9 @@ bool Session::doPASV() {
 
 
 int start_server() {
-  std::filesystem::create_directories("./data");
+  std::filesystem::create_directories(SAVEPATH);
   // chdir(getenv("HOME"));
-  usrManager.load(SAVEPATH);
+  usrManager.load(USRDATA);
   int max_uid = usrManager.getMaxUid();
   get_uid.init(max_uid + 1);
   TcpServer server;

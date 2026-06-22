@@ -111,19 +111,65 @@ User* UsrManager::getUser(int uid) {
   return &iter->second;
 }
 
-std::vector<int> FriendManager::list(int uid) {
+std::vector<int> FriendManager::list_friend(int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
 
+  std::vector<int> res;
+
+  auto it = friends.find(uid);
+  if(it == friends.end()) return res;
+
+  for(int f : it->second) res.push_back(f);
+
+  return res;
 }
 
-int FriendManager::add(int uid1,int uid2) {
+std::vector<int> FriendManager::list_request(int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
 
+  std::vector<int> res;
+
+  auto it = requests.find(uid);
+  if(it == requests.end()) return res;
+
+  for(int f : it->second) res.push_back(f);
+
+  return res;
 }
+
+// int FriendManager::add(int uid1,int uid2) {
+//   if(uid1 == uid2) return 1;
+  
+// }
 
 int FriendManager::del(int uid1,int uid2) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  auto it1 = friends.find(uid1);
+  if(it1 != friends.end()) it1->second.erase(uid2);
+
+  auto it2 = friends.find(uid2);
+  if(it2 != friends.end()) it2->second.erase(uid1);
+
+  return 0;
+}
+
+int FriendManager::request(int uid1,int uid2) {
+  if(uid1 == uid2) return 1; //不可添加自己为好友
+  std::lock_guard<std::mutex> lock(mtx_);
 
 }
 
-int FriendManager::apply(int uid) {
+int FriendManager::apply(int uid1,int uid2) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  friends[uid1].insert(uid2);
+  friends[uid2].insert(uid1);
+
+  return true;
+}
+
+int FriendManager::regect(int uid1,int uid2) {
 
 }
 
@@ -132,7 +178,7 @@ bool FriendManager::load(const std::string& path) {
 }
 
 bool FriendManager::save(const std::string& path) {
-  
+
 }
 
 void MenuManager::show(ClientState state) {
