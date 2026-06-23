@@ -158,19 +158,44 @@ int FriendManager::request(int uid1,int uid2) {
   if(uid1 == uid2) return 1; //不可添加自己为好友
   std::lock_guard<std::mutex> lock(mtx_);
 
+  if(isFriend(uid1,uid2)) return 2; //已经是好友
+
+  if(requests[uid1].count(uid2)) {
+    return 3; //已发送过申请
+  }
+
+  requests[uid1].insert(uid2);
+  return 0;
 }
 
-int FriendManager::apply(int uid1,int uid2) {
+int FriendManager::agree(int uid1,int uid2) {
   std::lock_guard<std::mutex> lock(mtx_);
 
   friends[uid1].insert(uid2);
   friends[uid2].insert(uid1);
-
+  if(requests[uid1].count(uid2)) requests[uid1].erase(uid2);
+  if(requests[uid2].count(uid1)) requests[uid2].erase(uid1);
   return true;
 }
 
-int FriendManager::regect(int uid1,int uid2) {
+int FriendManager::reject(int uid1,int uid2) {
+  std::lock_guard<std::mutex> lock(mtx_);
 
+  if(requests[uid1].count(uid2)) requests[uid1].erase(uid2);
+  if(requests[uid2].count(uid1)) requests[uid2].erase(uid1);
+  return true;
+}
+
+bool FriendManager::isFriend(int uid1,int uid2) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  auto it = friends.find(uid1);
+
+  if(it == friends.end()) {
+    return false;
+  }
+
+  return it->second.count(uid2) > 0;
 }
 
 bool FriendManager::load(const std::string& path) {

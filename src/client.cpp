@@ -74,24 +74,110 @@ void recvthread(TcpSocket& sock) {
     }
 }
 
-void sendthread(TcpSocket& sock) {
+void sendthread(TcpSocket& sock,User usr) {
     while(true) {
         int choice;
         menu.show(ClientState::MAIN_MENU);
         std::cin >> choice;
-        if(choice == 1) {
+        while(choice == 1) {
             menu.show(ClientState::FRIEND_MENU);
             std::cin >>choice;
             if(choice == 1) {
                 //friend_list();
             } else if(choice == 2) {
                 //friend_add();
+                std::string id;
+                while(id.empty()) {
+                    std::cout << "请输入对方uid：\n";
+                    std::cin >> id;
+                }
+                nlohmann::json j;
+                j["type"] = "friend";
+                j["action"] = "request";
+                j["from_uid"] = std::to_string(usr.uid);
+                j["to_uid"] = id;
+                sock.sendMsg(j.dump());
+                std::string res;
+                sock.recvMsg(res);
+                if(res == "OK") {
+                    std::cout << "已发送好友申请，请等待对方同意\n";
+                } else {
+                    std::cout << res << std::endl;
+                }
             } else if(choice == 3) {
                 //删除
+                std::string id;
+                while(id.empty()) {
+                    std::cout << "请输入对方uid：\n";
+                    std::cin >> id;
+                }
+                nlohmann::json j;
+                j["type"] = "friend";
+                j["action"] = "del";
+                j["from_uid"] = std::to_string(usr.uid);
+                j["to_uid"] = id;
+                sock.sendMsg(j.dump());
+                std::string res;
+                sock.recvMsg(res);
+                if(res == "OK") {
+                    std::cout << "已删除 uid: " << id << std::endl;
+                } else {
+                    std::cout << res << std::endl;
+                }
             } else if(choice == 4) {
                 //好友申请
+                nlohmann::json j;
+                j["type"] = "friend";
+                j["action"] = "check_request";
+                j["from_uid"] = std::to_string(usr.uid);
+                // j["to_uid"] = id;
+                sock.sendMsg(j.dump());
+                std::string res;
+                sock.recvMsg(res);
+
+                if(res == "OK") {
+                    // for() {
+
+                    // }
+                    std::string uid;
+                    while(uid != "0") {
+                        std::cout << "请输入一个用户id(输入“0”退出):\n";
+                        if(uid == "0") break;
+                        int choice = 0;
+                        while(choice < 1 || choice >3) {
+                            std::cout << "1.同意\n" << "2.拒绝\n" << "3.取消\n";
+                            std::cin >> choice;
+                            if(choice == 1) {
+                                nlohmann::json js;
+                                js["type"] = "friend";
+                                js["action"] = "agree";
+                                js["from_uid"] = std::to_string(usr.uid);
+                                j["to_uid"] = uid;
+                                sock.sendMsg(js.dump());
+                                std::string result;
+                                sock.recvMsg(result);
+
+                            } else if(choice == 2) {
+                                nlohmann::json js;
+                                js["type"] = "friend";
+                                js["action"] = "reject";
+                                js["from_uid"] = std::to_string(usr.uid);
+                                j["to_uid"] = uid;
+                                sock.sendMsg(js.dump());
+                                std::string result;
+                                sock.recvMsg(result);
+
+                            } else if(choice == 3) {
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    std::cout << res << std::endl;
+                }
             } else if(choice == 5) {
-                continue;
+                // continue;
+                break;
             }
         }
 
@@ -147,39 +233,6 @@ int start_client() {
         std::cin >> choice;
     }
 
-    while(choice == "2") {
-    // while(true) {
-        if(usr.username.empty()) {
-            std::cout << "请输入用户名:\n";
-            std::cin >> usr.username ;
-            if(usr.username.empty()) continue;
-        }
-        if(usr.password.empty()) {
-            std::cout << "请输入密码:\n";
-            std::cin >> usr.password;
-            if(usr.username.empty()) continue;
-        }
-        nlohmann::json j;
-        j["type"] = "register";
-        j["username"] = usr.username;
-        j["password"] = usr.password;
-        sock->sendMsg(j.dump());
-        std::string id;
-        sock->recvMsg(id);
-        if(id == "error") {
-            std::cout << "用户名已存在，请重试\n";
-            usr.username.clear();
-            usr.password.clear();
-            continue;
-        }
-        usr.uid = std::stoi(id);
-
-        prompt.clear();
-        prompt = usr.username + " " + id + " >> ";
-
-        break;
-    }
-
     while(choice == "1") {
         if(usr.username.empty()) {
             std::cout << "请输入用户名:\n";
@@ -192,7 +245,8 @@ int start_client() {
             if(usr.username.empty()) continue;
         }
         nlohmann::json j;
-        j["type"] = "login" ;
+        j["type"] = "user";
+        j["action"] = "login";
         j["username"] = usr.username;
         j["password"] = usr.password;
         sock->sendMsg(j.dump());
@@ -212,7 +266,41 @@ int start_client() {
         break;
     }
 
-    std::thread t1(sendthread,std::ref(*sock));
+    while(choice == "2") {
+    // while(true) {
+        if(usr.username.empty()) {
+            std::cout << "请输入用户名:\n";
+            std::cin >> usr.username ;
+            if(usr.username.empty()) continue;
+        }
+        if(usr.password.empty()) {
+            std::cout << "请输入密码:\n";
+            std::cin >> usr.password;
+            if(usr.username.empty()) continue;
+        }
+        nlohmann::json j;
+        j["type"] = "user";
+        j["action"] = "register";
+        j["username"] = usr.username;
+        j["password"] = usr.password;
+        sock->sendMsg(j.dump());
+        std::string id;
+        sock->recvMsg(id);
+        if(id == "error") {
+            std::cout << "用户名已存在，请重试\n";
+            usr.username.clear();
+            usr.password.clear();
+            continue;
+        }
+        usr.uid = std::stoi(id);
+
+        prompt.clear();
+        prompt = usr.username + " " + id + " >> ";
+
+        break;
+    }
+
+    std::thread t1(sendthread,std::ref(*sock),std::ref(usr));
     std::thread t2(recvthread,std::ref(*sock));
 
     t1.join();

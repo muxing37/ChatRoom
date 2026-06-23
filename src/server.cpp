@@ -101,7 +101,7 @@ void Session::start() {
   // User usr;
   int uid;
   User* usr;
-  std::string msg;
+  std::string recv;
   while(true) {
     // nlohmann::json j;
     std::string res;
@@ -116,7 +116,11 @@ void Session::start() {
       }
     }
     nlohmann::json j = nlohmann::json::parse(res);
-    if(j["type"] == "register") {
+    if(j["type" != "user"]) {
+      ctrlSock_->sendMsg("非预期的请求");
+      continue;
+    }
+    if(j["action"] == "register") {
       uid = get_uid.get();
       if(usrManager.regis(j["username"],j["password"],uid)) {
         ctrlSock_->sendMsg(std::to_string(uid));
@@ -128,7 +132,7 @@ void Session::start() {
         continue;
       }
       // sessionManager.bindUser(usr.uid,ctrlSock_);
-    } else if(j["type"] == "login") {
+    } else if(j["action"] == "login") {
       if(usrManager.login(j["username"],j["password"],uid)) {
         ctrlSock_->sendMsg(std::to_string(uid));
         usr = usrManager.getUser(uid);
@@ -138,7 +142,7 @@ void Session::start() {
         continue;
       }
     } else {
-
+      ctrlSock_->sendMsg("非预期的请求");
     }
     // break;
   }
@@ -147,20 +151,29 @@ void Session::start() {
     // std::cout << usr->uid << std::endl;
     // std::cout << usr->username << std::endl;
     sessionManager.bindUser(usr->uid,ctrlSock_);
-    if(ctrlSock_->recvMsg(msg) != NetResult::OK) {
+    if(ctrlSock_->recvMsg(recv) != NetResult::OK) {
       std::cout << "[INFO] client disconnected or recv failed\n";
       break;
     }
-    std::cout << "recv: " << msg << "\n";
+    std::cout << "recv: " << recv << "\n";
     // sessionManager.forEach();
-    if(!(msg.empty()) && msg[0] != '/') {
-      sessionManager.forEach([&](int uid,auto sock){
-        sock->sendMsg(msg);
-      });
-      continue;
+    if(recv.empty()) continue;
+    nlohmann::json j = nlohmann::json::parse(recv);
+    if(j["type"] == "friend") {
+      if(j["action"] == "request") {
+
+      } else if(j["action"] == "del") {
+
+      } else if(j["action"] == "check_request") {
+        
+      } else if(j["action"] == "") {
+        
+      } else {
+        ctrlSock_->sendMsg("非预期的请求");
+      }
     }
     std::vector<std::string> token;
-    token=gettoken(msg);
+    // token=gettoken(msg);
 
     if(token.size()==0) {
       continue;

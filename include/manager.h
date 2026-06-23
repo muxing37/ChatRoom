@@ -45,12 +45,15 @@ private:
 
 class FriendManager {
 public:
-  std::vector<int> list(int uid);
+  std::vector<int> list_friend(int uid);
+  std::vector<int> list_request(int uid);
   // int add(int uid1,int uid2);
   int del(int uid1,int uid2);
-  int require(int uid1,int uid2);
-  int apply(int uid1,int uid2);
-  int regect(int uid1,int uid2);
+  int request(int uid1,int uid2);
+  int agree(int uid1,int uid2);
+  int reject(int uid1,int uid2);
+
+  bool isFriend(int uid1,int uid2);
 
   bool load(const std::string& path);
   bool save(const std::string& path);
