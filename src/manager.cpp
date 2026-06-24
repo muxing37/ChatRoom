@@ -100,6 +100,13 @@ int UsrManager::getMaxUid() {
   return max_uid;
 }
 
+bool UsrManager::isExist(const std::string& username) {
+  if(name_map_.count(username)) {
+    return true;
+  }
+  return false;
+}
+
 User* UsrManager::getUser(int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
 
@@ -200,56 +207,12 @@ bool FriendManager::isFriend(int uid1,int uid2) {
 
 bool FriendManager::load(const std::string& path) {
 
+  return true;
 }
 
 bool FriendManager::save(const std::string& path) {
 
-}
-
-void MenuManager::show(ClientState state) {
-  const std::vector<std::string>* menu = nullptr;
-  std::string title;
-
-  switch(state) {
-    case ClientState::LOGIN:
-      menu = &menu_login_;
-      title = "登录菜单";
-      break;
-
-    case ClientState::MAIN_MENU:
-      menu = &menu_main_;
-      title = "主菜单";
-      break;
-
-    case ClientState::FRIEND_MENU:
-      menu = &menu_friend_;
-      title = "好友管理";
-      break;
-
-    case ClientState::PRIVATE_CHAT:
-      menu = &menu_private_chat_;
-      title = "私聊";
-      break;
-
-    case ClientState::GROUP_MENU:
-      menu = &menu_group_;
-      title = "群聊";
-      break;
-
-    default:
-      return;
-  }
-
-  std::cout << "\n";
-  std::cout << "====================\n";
-  std::cout << "      " << title << '\n';
-  std::cout << "====================\n\n";
-
-  for (size_t i = 0; i < menu->size(); ++i) {
-    std::cout << i + 1 << ". " << (*menu)[i] << '\n';
-  }
-
-  std::cout << "\n请选择: ";
+  return true;
 }
 
 void SessionManager::unbindUser(int user_id) {

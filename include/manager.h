@@ -35,6 +35,7 @@ public:
   bool save(const std::string& path);
 
   int getMaxUid();
+  bool isExist(const std::string& username);
   User* getUser(int uid);
     
 private:
@@ -70,49 +71,6 @@ private:
   std::unordered_map<int,std::unordered_set<int>> requests;
   // std::unordered_map<int,std::vector<Request>> requests;
   std::mutex mtx_;
-};
-
-class MenuManager {
-public:
-  void show(ClientState state);
-
-private:
-  const std::vector<std::string> menu_login_ = {
-    "登录",
-    "注册",
-    "退出"
-  };
-
-  const std::vector<std::string> menu_main_ = {
-    "好友管理",
-    "私聊",
-    "群聊",
-    "个人信息",
-    "退出登录"
-  };
-
-  const std::vector<std::string> menu_friend_ = {
-    "查看好友列表",
-    "添加好友",
-    "删除好友",
-    "查看好友申请",
-    "返回主菜单"
-  };
-
-  const std::vector<std::string> menu_private_chat_ = {
-    "选择好友聊天",
-    "查看聊天记录",
-    "返回主菜单"
-  };
-
-  const std::vector<std::string> menu_group_ = {
-    "查看群聊",
-    "创建群聊",
-    "加入群聊",
-    "退出群聊",
-    "返回主菜单"
-  };
-
 };
 
 class SessionManager {

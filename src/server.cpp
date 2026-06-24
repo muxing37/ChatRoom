@@ -7,6 +7,7 @@ const std::string USRDATA = SAVEPATH + "/usrdata.json";
 // std::string 
 UsrManager usrManager;
 SessionManager sessionManager;
+FriendManager friendManager;
 UidGenerator get_uid;
 
 class TcpServer {
@@ -99,11 +100,11 @@ std::shared_ptr<TcpSocket> TcpServer::acceptConn() {
 
 void Session::start() {
   // User usr;
-  int uid;
   User* usr;
   std::string recv;
   while(true) {
     // nlohmann::json j;
+    int uid;
     std::string res;
     if(ctrlSock_->recvMsg(res) != NetResult::OK) return;
     if(res.empty()) {
@@ -116,12 +117,19 @@ void Session::start() {
       }
     }
     nlohmann::json j = nlohmann::json::parse(res);
-    if(j["type" != "user"]) {
+    // std::cout << res << std::endl;
+    if(j["type"] != "user") {
       ctrlSock_->sendMsg("非预期的请求");
       continue;
     }
     if(j["action"] == "register") {
-      uid = get_uid.get();
+      if(usrManager.isExist(j["username"])) {
+        ctrlSock_->sendMsg("error");
+        continue;
+      } else {
+        uid = get_uid.get();
+      }
+
       if(usrManager.regis(j["username"],j["password"],uid)) {
         ctrlSock_->sendMsg(std::to_string(uid));
         usr = usrManager.getUser(uid);
@@ -146,7 +154,7 @@ void Session::start() {
     }
     // break;
   }
-  
+
   while(true) {
     // std::cout << usr->uid << std::endl;
     // std::cout << usr->username << std::endl;
@@ -161,13 +169,35 @@ void Session::start() {
     nlohmann::json j = nlohmann::json::parse(recv);
     if(j["type"] == "friend") {
       if(j["action"] == "request") {
-
+        friendManager.request(j["from_uid"],j["to_uid"]);
+        ctrlSock_->sendMsg("OK");
       } else if(j["action"] == "del") {
-
+        friendManager.del(j["from_uid"],j["to_uid"]);
+        ctrlSock_->sendMsg("OK");
       } else if(j["action"] == "check_request") {
-        
-      } else if(j["action"] == "") {
-        
+        std::vector<int> list = friendManager.list_request(j["from_uid"]);
+        ctrlSock_->sendMsg("OK");
+        for(int uid : list) {
+          User* res = usrManager.getUser(uid);
+          std::string back = std::to_string(res->uid) + "  " + res->username;
+          ctrlSock_->sendMsg(back);
+        }
+        ctrlSock_->sendMsg("finish");
+      } else if(j["action"] == "agree") {
+        friendManager.agree(j["from_uid"],j["to_uid"]);
+        ctrlSock_->sendMsg("OK");
+      } else if(j["action"] == "reject") {
+        friendManager.reject(j["from_uid"],j["to_uid"]);
+        ctrlSock_->sendMsg("OK");
+      } else if(j["action"] == "list_friend") {
+        std::vector<int> list = friendManager.list_friend(j["from_uid"]);
+        ctrlSock_->sendMsg("OK");
+        for(int uid : list) {
+          User* res = usrManager.getUser(uid);
+          std::string back = std::to_string(res->uid) + "  " + res->username;
+          ctrlSock_->sendMsg(back);
+        }
+        ctrlSock_->sendMsg("finish");
       } else {
         ctrlSock_->sendMsg("非预期的请求");
       }
