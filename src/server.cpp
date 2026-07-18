@@ -175,7 +175,7 @@ void Session::start() {
         friendManager.del(j["from_uid"],j["to_uid"]);
         ctrlSock_->sendMsg("OK");
       } else if(j["action"] == "check_request") {
-        std::vector<int> list = friendManager.list_request(j["from_uid"]);
+        std::vector<int> list = friendManager.list_request(std::stoi(j["from_uid"].get<std::string>()));
         ctrlSock_->sendMsg("OK");
         for(int uid : list) {
           User* res = usrManager.getUser(uid);
@@ -190,7 +190,7 @@ void Session::start() {
         friendManager.reject(j["from_uid"],j["to_uid"]);
         ctrlSock_->sendMsg("OK");
       } else if(j["action"] == "list_friend") {
-        std::vector<int> list = friendManager.list_friend(j["from_uid"]);
+        std::vector<int> list = friendManager.list_friend(std::stoi(j["from_uid"].get<std::string>()));
         ctrlSock_->sendMsg("OK");
         for(int uid : list) {
           User* res = usrManager.getUser(uid);
