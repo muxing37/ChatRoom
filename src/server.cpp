@@ -169,10 +169,10 @@ void Session::start() {
     nlohmann::json j = nlohmann::json::parse(recv);
     if(j["type"] == "friend") {
       if(j["action"] == "request") {
-        friendManager.request(j["from_uid"],j["to_uid"]);
+        friendManager.request(std::stoi(j["from_uid"].get<std::string>()),std::stoi(j["to_uid"].get<std::string>()));
         ctrlSock_->sendMsg("OK");
       } else if(j["action"] == "del") {
-        friendManager.del(j["from_uid"],j["to_uid"]);
+        friendManager.del(std::stoi(j["from_uid"].get<std::string>()),std::stoi(j["to_uid"].get<std::string>()));
         ctrlSock_->sendMsg("OK");
       } else if(j["action"] == "check_request") {
         std::vector<int> list = friendManager.list_request(std::stoi(j["from_uid"].get<std::string>()));
@@ -184,10 +184,10 @@ void Session::start() {
         }
         ctrlSock_->sendMsg("finish");
       } else if(j["action"] == "agree") {
-        friendManager.agree(j["from_uid"],j["to_uid"]);
+        friendManager.agree(std::stoi(j["from_uid"].get<std::string>()),std::stoi(j["to_uid"].get<std::string>()));
         ctrlSock_->sendMsg("OK");
       } else if(j["action"] == "reject") {
-        friendManager.reject(j["from_uid"],j["to_uid"]);
+        friendManager.reject(std::stoi(j["from_uid"].get<std::string>()),std::stoi(j["to_uid"].get<std::string>()));
         ctrlSock_->sendMsg("OK");
       } else if(j["action"] == "list_friend") {
         std::vector<int> list = friendManager.list_friend(std::stoi(j["from_uid"].get<std::string>()));
