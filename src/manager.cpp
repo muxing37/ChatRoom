@@ -139,15 +139,12 @@ std::vector<int> FriendManager::list_request(int uid) {
   auto it = requests.find(uid);
   if(it == requests.end()) return res;
 
-  for(int f : it->second) res.push_back(f);
-
+  for(int f : it->second) {
+    std::cout << f << std::endl;
+    res.push_back(f);
+  }
   return res;
 }
-
-// int FriendManager::add(int uid1,int uid2) {
-//   if(uid1 == uid2) return 1;
-  
-// }
 
 int FriendManager::del(int uid1,int uid2) {
   std::lock_guard<std::mutex> lock(mtx_);
@@ -164,13 +161,10 @@ int FriendManager::del(int uid1,int uid2) {
 int FriendManager::request(int uid1,int uid2) {
   if(uid1 == uid2) return 1; //不可添加自己为好友
   std::lock_guard<std::mutex> lock(mtx_);
-
-  if(isFriend(uid1,uid2)) return 2; //已经是好友
-
+  if(FriendManager::isFriend(uid1,uid2)) return 2; //已经是好友
   if(requests[uid1].count(uid2)) {
     return 3; //已发送过申请
   }
-
   requests[uid1].insert(uid2);
   return 0;
 }
@@ -194,14 +188,11 @@ int FriendManager::reject(int uid1,int uid2) {
 }
 
 bool FriendManager::isFriend(int uid1,int uid2) {
-  std::lock_guard<std::mutex> lock(mtx_);
-
+  // std::lock_guard<std::mutex> lock(mtx_);
   auto it = friends.find(uid1);
-
   if(it == friends.end()) {
     return false;
   }
-
   return it->second.count(uid2) > 0;
 }
 

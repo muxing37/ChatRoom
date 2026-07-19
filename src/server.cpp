@@ -169,14 +169,17 @@ void Session::start() {
     nlohmann::json j = nlohmann::json::parse(recv);
     if(j["type"] == "friend") {
       if(j["action"] == "request") {
-        friendManager.request(std::stoi(j["from_uid"].get<std::string>()),std::stoi(j["to_uid"].get<std::string>()));
+        std::cout << "222\n";
+        int a = friendManager.request(std::stoi(j["to_uid"].get<std::string>()),std::stoi(j["from_uid"].get<std::string>()));
+        std::cout << a << "\n";
         ctrlSock_->sendMsg("OK");
       } else if(j["action"] == "del") {
         friendManager.del(std::stoi(j["from_uid"].get<std::string>()),std::stoi(j["to_uid"].get<std::string>()));
         ctrlSock_->sendMsg("OK");
       } else if(j["action"] == "check_request") {
-        std::vector<int> list = friendManager.list_request(std::stoi(j["from_uid"].get<std::string>()));
         ctrlSock_->sendMsg("OK");
+        std::vector<int> list = friendManager.list_request(std::stoi(j["from_uid"].get<std::string>()));
+        
         for(int uid : list) {
           User* res = usrManager.getUser(uid);
           std::string back = std::to_string(res->uid) + "  " + res->username;
@@ -201,6 +204,7 @@ void Session::start() {
       } else {
         ctrlSock_->sendMsg("非预期的请求");
       }
+      continue;
     }
     std::vector<std::string> token;
     // token=gettoken(msg);

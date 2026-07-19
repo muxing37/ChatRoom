@@ -170,8 +170,9 @@ void sendthread(TcpSocket& sock,User usr) {
     std::cin >> choice;
     while(choice == 1) {
       menu.show(ClientState::FRIEND_MENU);
-      std::cin >>choice;
-      if(choice == 1) {
+      int choice1;
+      std::cin >>choice1;
+      if(choice1 == 1) {
         //friend_list();
         nlohmann::json j;
         j["type"] = "friend";
@@ -180,12 +181,12 @@ void sendthread(TcpSocket& sock,User usr) {
         // j["to_uid"] = id;
         sock.sendMsg(j.dump());
         std::string res;
-        sock.recvMsg(res);
+        // sock.recvMsg(res);
         if(res == "OK") {
           std::string back;
           std::vector<std::string> result;
           while(true) {
-            sock.recvMsg(back);
+            // sock.recvMsg(back);
             if(back == "finish") break;
             result.push_back(back);
           }
@@ -194,7 +195,7 @@ void sendthread(TcpSocket& sock,User usr) {
             std::cout << out << std::endl;
           }
         }
-      } else if(choice == 2) {
+      } else if(choice1 == 2) {
         //friend_add();
         std::string id;
         while(id.empty()) {
@@ -208,13 +209,13 @@ void sendthread(TcpSocket& sock,User usr) {
         j["to_uid"] = id;
         sock.sendMsg(j.dump());
         std::string res;
-        sock.recvMsg(res);
+        // sock.recvMsg(res);
         if(res == "OK") {
           std::cout << "已发送好友申请，请等待对方同意\n";
         } else {
           std::cout << res << std::endl;
         }
-      } else if(choice == 3) {
+      } else if(choice1 == 3) {
         //删除
         std::string id;
         while(id.empty()) {
@@ -228,13 +229,13 @@ void sendthread(TcpSocket& sock,User usr) {
         j["to_uid"] = id;
         sock.sendMsg(j.dump());
         std::string res;
-        sock.recvMsg(res);
+        // sock.recvMsg(res);
         if(res == "OK") {
           std::cout << "已删除 uid: " << id << std::endl;
         } else {
           std::cout << res << std::endl;
         }
-      } else if(choice == 4) {
+      } else if(choice1 == 4) {
         //好友申请
         nlohmann::json j;
         j["type"] = "friend";
@@ -243,13 +244,13 @@ void sendthread(TcpSocket& sock,User usr) {
         // j["to_uid"] = id;
         sock.sendMsg(j.dump());
         std::string res;
-        sock.recvMsg(res);
+        // sock.recvMsg(res);
 
         if(res == "OK") {
           std::string back;
           std::vector<std::string> result;
           while(true) {
-            sock.recvMsg(back);
+            // sock.recvMsg(back);
             if(back == "finish") break;
             result.push_back(back);
           }
@@ -260,32 +261,35 @@ void sendthread(TcpSocket& sock,User usr) {
           std::string uid;
           while(uid != "0") {
             std::cout << "请输入一个用户id(输入“0”退出):\n";
+            int c = 0;
+            std::cin >> c;
+            uid = std:: to_string(c);
             if(uid == "0") break;
-            int choice = 0;
-            while(choice < 1 || choice >3) {
+            int ch = 0;
+            while(ch < 1 || ch >3) {
               std::cout << "1.同意\n" << "2.拒绝\n" << "3.取消\n";
-              std::cin >> choice;
-              if(choice == 1) {
+              std::cin >> ch;
+              if(ch == 1) {
                 nlohmann::json js;
                 js["type"] = "friend";
                 js["action"] = "agree";
                 js["from_uid"] = std::to_string(usr.uid);
-                j["to_uid"] = uid;
+                js["to_uid"] = uid;
                 sock.sendMsg(js.dump());
                 std::string re;
-                sock.recvMsg(re);
+                // sock.recvMsg(re);
 
-              } else if(choice == 2) {
+              } else if(ch == 2) {
                 nlohmann::json js;
                 js["type"] = "friend";
                 js["action"] = "reject";
                 js["from_uid"] = std::to_string(usr.uid);
-                j["to_uid"] = uid;
+                js["to_uid"] = uid;
                 sock.sendMsg(js.dump());
                 std::string re;
-                sock.recvMsg(re);
+                // sock.recvMsg(re);
 
-              } else if(choice == 3) {
+              } else if(ch == 3) {
                 break;
               }
             }
@@ -293,7 +297,7 @@ void sendthread(TcpSocket& sock,User usr) {
         } else {
           std::cout << res << std::endl;
         }
-      } else if(choice == 5) {
+      } else if(choice1 == 5) {
         // continue;
         break;
       }
