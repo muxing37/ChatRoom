@@ -1,6 +1,8 @@
 #include "manager.h"
 
-// bool UsrManager::regis()
+const std::string SAVEPATH = "./data";
+const std::string USRDATA = SAVEPATH + "/usrdata.json";
+const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
 
 bool UsrManager::regis(const std::string& username,const std::string& password,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
@@ -9,7 +11,6 @@ bool UsrManager::regis(const std::string& username,const std::string& password,i
     return false;
   }
 
-  // int uid = get_uid.get();
   User user{
     uid,
     username,
@@ -19,7 +20,6 @@ bool UsrManager::regis(const std::string& username,const std::string& password,i
   uid_map_[uid] = user;
   name_map_[username] = uid;
 
-  // out_uid = uid;
   return true;
 }
 
@@ -155,6 +155,7 @@ int FriendManager::del(int uid1,int uid2) {
   auto it2 = friends.find(uid2);
   if(it2 != friends.end()) it2->second.erase(uid1);
 
+  save(FRIENDDATA);
   return 0;
 }
 
@@ -166,6 +167,8 @@ int FriendManager::request(int uid1,int uid2) {
     return 3; //已发送过申请
   }
   requests[uid1].insert(uid2);
+  save(FRIENDDATA);
+
   return 0;
 }
 
@@ -176,6 +179,8 @@ int FriendManager::agree(int uid1,int uid2) {
   friends[uid2].insert(uid1);
   if(requests[uid1].count(uid2)) requests[uid1].erase(uid2);
   if(requests[uid2].count(uid1)) requests[uid2].erase(uid1);
+  
+  save(FRIENDDATA);
   return true;
 }
 
@@ -184,6 +189,7 @@ int FriendManager::reject(int uid1,int uid2) {
 
   if(requests[uid1].count(uid2)) requests[uid1].erase(uid2);
   if(requests[uid2].count(uid1)) requests[uid2].erase(uid1);
+  save(FRIENDDATA);
   return true;
 }
 
@@ -197,12 +203,56 @@ bool FriendManager::isFriend(int uid1,int uid2) {
 }
 
 bool FriendManager::load(const std::string& path) {
+  std::ifstream ifs(path);
+
+  if(!ifs.is_open()) return false;
+
+  nlohmann::json j;
+  ifs >> j;
+
+  friends.clear();
+  requests.clear();
+
+  if(j.contains("friends")) {
+    for(auto& [uid, arr] : j["friends"].items()) {
+      int id = std::stoi(uid);
+      for(auto& x : arr) {
+        friends[id].insert(x.get<int>());
+      }
+    }
+  }
+
+  if(j.contains("requests")) {
+    for(auto& [uid, arr] : j["requests"].items()) {
+      int id = std::stoi(uid);
+      for(auto& x : arr) {
+        requests[id].insert(x.get<int>());
+      }
+    }
+  }
 
   return true;
 }
 
 bool FriendManager::save(const std::string& path) {
+  nlohmann::json j;
+  // 保存好友
+  for(const auto& [uid, list] : friends) {
+    for(int id : list) {
+      j["friends"][std::to_string(uid)].push_back(id);
+    }
+  }
+  // 保存好友申请
+  for(const auto& [uid, list] : requests) {
+    for(int id : list) {
+      j["requests"][std::to_string(uid)].push_back(id);
+    }
+  }
 
+  std::ofstream ofs(path);
+  if(!ofs.is_open()) return false;
+
+  ofs << std::setw(4) << j;
   return true;
 }
 

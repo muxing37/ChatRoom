@@ -1,9 +1,11 @@
 #include "client.h"
 #include "user.h"
-#include <thread>
 
 #define MAX_PATH 1024
 // int running=0;
+std::queue<std::string> replyQueue;
+std::mutex replyMutex;
+std::condition_variable replyCv;
 
 class MenuManager {
 public:
@@ -154,12 +156,29 @@ bool TcpClient::connectToHost(const char* ip, unsigned short port) {
   return true;
 }
 
+std::string waitReply() {
+  std::unique_lock<std::mutex> lock(replyMutex);
+
+  replyCv.wait(lock,[]{
+    return !replyQueue.empty();
+  });
+
+  std::string res = replyQueue.front();
+  replyQueue.pop();
+
+  return res;
+}
+
 void recvthread(TcpSocket& sock) {
-  while(true) {
+  while (true) {
     std::string res;
-    NetResult ret = sock.recvMsg(res);
-    if(ret != NetResult::OK) break;
-    std::cout << "\n" << res << "\n" <<std::flush;
+    if(sock.recvMsg(res) != NetResult::OK) break;
+    if(res.empty()) continue;
+    {
+      std::lock_guard<std::mutex> lock(replyMutex);
+      replyQueue.push(res);
+    }
+    replyCv.notify_one();
   }
 }
 
@@ -180,20 +199,16 @@ void sendthread(TcpSocket& sock,User usr) {
         j["from_uid"] = std::to_string(usr.uid);
         // j["to_uid"] = id;
         sock.sendMsg(j.dump());
-        std::string res;
-        // sock.recvMsg(res);
-        if(res == "OK") {
-          std::string back;
-          std::vector<std::string> result;
-          while(true) {
-            // sock.recvMsg(back);
-            if(back == "finish") break;
-            result.push_back(back);
-          }
-          std::cout << "好友列表：\n";
-          for(std::string out : result) {
-            std::cout << out << std::endl;
-          }
+        std::string res = waitReply();
+        auto js = nlohmann::json::parse(res);
+
+        if(js["status"] != 0) {
+          std::cout<<"获取失败\n";
+          continue;
+        }
+        std::cout<<"好友列表：\n";
+        for(auto &x : js["friends"]) {
+          std::cout << x["uid"] << " " << x["username"] << std::endl;
         }
       } else if(choice1 == 2) {
         //friend_add();
@@ -208,12 +223,13 @@ void sendthread(TcpSocket& sock,User usr) {
         j["from_uid"] = std::to_string(usr.uid);
         j["to_uid"] = id;
         sock.sendMsg(j.dump());
-        std::string res;
-        // sock.recvMsg(res);
-        if(res == "OK") {
-          std::cout << "已发送好友申请，请等待对方同意\n";
+
+        auto js = nlohmann::json::parse(waitReply());
+
+        if(js["status"]==0) {
+          std::cout<<"已发送好友申请\n";
         } else {
-          std::cout << res << std::endl;
+          std::cout<<"发送失败\n";
         }
       } else if(choice1 == 3) {
         //删除
@@ -227,13 +243,11 @@ void sendthread(TcpSocket& sock,User usr) {
         j["action"] = "del";
         j["from_uid"] = std::to_string(usr.uid);
         j["to_uid"] = id;
+
         sock.sendMsg(j.dump());
-        std::string res;
-        // sock.recvMsg(res);
-        if(res == "OK") {
-          std::cout << "已删除 uid: " << id << std::endl;
-        } else {
-          std::cout << res << std::endl;
+        auto js=nlohmann::json::parse(waitReply());
+        if(js["status"]==0) {
+          std::cout<<"删除成功\n";
         }
       } else if(choice1 == 4) {
         //好友申请
@@ -241,61 +255,53 @@ void sendthread(TcpSocket& sock,User usr) {
         j["type"] = "friend";
         j["action"] = "check_request";
         j["from_uid"] = std::to_string(usr.uid);
-        // j["to_uid"] = id;
         sock.sendMsg(j.dump());
-        std::string res;
-        // sock.recvMsg(res);
 
-        if(res == "OK") {
-          std::string back;
-          std::vector<std::string> result;
-          while(true) {
-            // sock.recvMsg(back);
-            if(back == "finish") break;
-            result.push_back(back);
+        auto js=nlohmann::json::parse(waitReply());
+
+        for(auto &x:js["requests"]) {
+          std::cout << x["uid"] << " " << x["username"] << std::endl;
+        }
+        std::string uid;
+        while (uid != "0") {
+          std::cout << "请输入一个用户id(输入“0”退出):\n";
+          int c = 0;
+          std::cin >> c;
+          uid = std::to_string(c);
+
+          if (uid == "0") break;
+
+          int ch = 0;
+          while (ch < 1 || ch > 3) {
+            std::cout << "1.同意\n" << "2.拒绝\n" << "3.取消\n";
+            std::cin >> ch;
           }
-          std::cout << "好友申请：\n";
-          for(std::string out : result) {
-            std::cout << out << std::endl;
+
+          if (ch == 3) {
+            continue;
           }
-          std::string uid;
-          while(uid != "0") {
-            std::cout << "请输入一个用户id(输入“0”退出):\n";
-            int c = 0;
-            std::cin >> c;
-            uid = std:: to_string(c);
-            if(uid == "0") break;
-            int ch = 0;
-            while(ch < 1 || ch >3) {
-              std::cout << "1.同意\n" << "2.拒绝\n" << "3.取消\n";
-              std::cin >> ch;
-              if(ch == 1) {
-                nlohmann::json js;
-                js["type"] = "friend";
-                js["action"] = "agree";
-                js["from_uid"] = std::to_string(usr.uid);
-                js["to_uid"] = uid;
-                sock.sendMsg(js.dump());
-                std::string re;
-                // sock.recvMsg(re);
 
-              } else if(ch == 2) {
-                nlohmann::json js;
-                js["type"] = "friend";
-                js["action"] = "reject";
-                js["from_uid"] = std::to_string(usr.uid);
-                js["to_uid"] = uid;
-                sock.sendMsg(js.dump());
-                std::string re;
-                // sock.recvMsg(re);
+          nlohmann::json js;
+          js["type"] = "friend";
+          js["action"] = (ch == 1 ? "agree" : "reject");
+          js["from_uid"] = std::to_string(usr.uid);
+          js["to_uid"] = uid;
 
-              } else if(ch == 3) {
-                break;
-              }
+          sock.sendMsg(js.dump());
+
+          std::string res = waitReply();
+
+          if (res == "OK") {
+            if (ch == 1) {
+              std::cout << "已同意好友申请\n";
+            } else {
+              std::cout << "已拒绝好友申请\n";
             }
+          } else {
+            std::cout << res << std::endl;
           }
-        } else {
-          std::cout << res << std::endl;
+
+          uid.clear();
         }
       } else if(choice1 == 5) {
         // continue;

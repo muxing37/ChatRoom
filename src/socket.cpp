@@ -41,12 +41,7 @@ int send_all(int fd,void *buf,size_t len) {
 NetResult TcpSocket::sendMsg(std::string msg) {
   uint32_t l=msg.size();
   uint32_t len=htonl(l);
-std::cout
-    << "[SEND fd="
-    << sockfd_
-    << "] "
-    << msg
-    << std::endl;
+  std::cout << "[SEND fd=" << sockfd_ << "] " << msg << std::endl;
   if(send_all(sockfd_,&len,sizeof(len))!=sizeof(len)) {
     return NetResult::SEND_ERROR;
   }
@@ -138,52 +133,20 @@ NetResult TcpSocket::sendFile(std::string& path,uint64_t offset) {
   return NetResult::OK;
 }
 
-// int recv_all(int fd,void *buf,size_t len) {
-//   size_t total=0;
-//   int retry=0;
-//   char *p=(char*)buf;
-//   while(total<len) {
-//     int n=recv(fd,p+total,len-total,0);
-// std::cout
-//     << "need=" << len
-//     << " total=" << total
-//     << " recv=" << n
-//     << std::endl;
-//     if(n>0) {
-//       total=total+n;
-//     } else if(n==0) {
-//       return total;
-//     } else {
-//       if(errno == EINTR) continue;
-//       return -1;
-//     }
-//   }
-//   return total;
-// }
-
-int recv_all(int fd, void *buf, size_t len)
-{
-  size_t total = 0;
-  char *p = (char *)buf;
-
-  while (total < len) {
-    int n = recv(fd, p + total, len - total, 0);
-
-    std::cout
-      << "recv need=" << len
-      << " total=" << total
-      << " n=" << n
-      << std::endl;
-
-    if (n > 0) {
-      total += n;
-    } else if (n == 0) {
+int recv_all(int fd,void *buf,size_t len) {
+  size_t total=0;
+  char *p=(char*)buf;
+  while(total<len) {
+    int n=recv(fd,p+total,len-total,0);
+    std::cout << "need=" << len << " total=" << total << " recv=" << n << std::endl;
+    if(n>0) {
+      total=total+n;
+    } else if(n==0) {
       std::cout << "peer closed\n";
       return total;
     } else {
       std::cout << "errno=" << errno << std::endl;
-      if (errno == EINTR)
-        continue;
+      if(errno == EINTR) continue;
       return -1;
     }
   }
@@ -195,19 +158,13 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
   uint32_t len=0;
 
   int ret=recv_all(sockfd_,&len,sizeof(len));
-std::cout
-<< "raw len = "
-<< len
-<< std::endl;
+  std::cout << "raw len = " << len << std::endl;
   if(ret==0) return NetResult::RECV_ERROR;
   if(ret!=sizeof(len)) return NetResult::RECV_ERROR;
   
   uint32_t l=ntohl(len);
 
-std::cout
-<< "host len = "
-<< l
-<< std::endl;
+  std::cout << "host len = " << l << std::endl;
 
   const uint32_t MAX_LEN=100*1024*1024;
 
@@ -225,19 +182,11 @@ std::cout
     }
   }
 
-std::cout
-    << "[RECV fd="
-    << sockfd_
-    << "] "
-    << "\"" << msg << "\""
-    << std::endl;
+  std::cout << "[RECV fd=" << sockfd_ << "] " << "\"" << msg << "\"" << std::endl;
 
-std::cout << "data: ";
-
-for (unsigned char c : msg)
-    printf("%02X ", c);
-
-std::cout << std::endl;
+  std::cout << "data: ";
+  for(unsigned char c : msg) printf("%02X ", c);
+  std::cout << std::endl;
 
   return NetResult::OK;
 }

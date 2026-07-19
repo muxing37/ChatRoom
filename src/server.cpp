@@ -4,7 +4,8 @@
 
 const std::string SAVEPATH = "./data";
 const std::string USRDATA = SAVEPATH + "/usrdata.json";
-// std::string 
+const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
+
 UsrManager usrManager;
 SessionManager sessionManager;
 FriendManager friendManager;
@@ -61,7 +62,7 @@ TcpServer::~TcpServer() {
 
 bool TcpServer::setListen(unsigned short port) {
   sockaddr_in addr;
-  memset (&addr,0,sizeof(addr));
+  memset(&addr,0,sizeof(addr));
   addr.sin_family=AF_INET;
   addr.sin_port=htons(port);
   addr.sin_addr.s_addr=INADDR_ANY;
@@ -99,11 +100,9 @@ std::shared_ptr<TcpSocket> TcpServer::acceptConn() {
 }
 
 void Session::start() {
-  // User usr;
   User* usr;
   std::string recv;
   while(true) {
-    // nlohmann::json j;
     int uid;
     std::string res;
     if(ctrlSock_->recvMsg(res) != NetResult::OK) return;
@@ -154,11 +153,10 @@ void Session::start() {
     }
     // break;
   }
-
+  sessionManager.bindUser(usr->uid,ctrlSock_);
   while(true) {
     // std::cout << usr->uid << std::endl;
     // std::cout << usr->username << std::endl;
-    sessionManager.bindUser(usr->uid,ctrlSock_);
     if(ctrlSock_->recvMsg(recv) != NetResult::OK) {
       std::cout << "[INFO] client disconnected or recv failed\n";
       break;
@@ -168,41 +166,61 @@ void Session::start() {
     if(recv.empty()) continue;
     nlohmann::json j = nlohmann::json::parse(recv);
     if(j["type"] == "friend") {
+      int self_uid = std::stoi(j["from_uid"].get<std::string>());
+      nlohmann::json reply;
+      reply["type"] = "reply";
+      reply["action"] = j["action"];
       if(j["action"] == "request") {
-        std::cout << "222\n";
-        int a = friendManager.request(std::stoi(j["to_uid"].get<std::string>()),std::stoi(j["from_uid"].get<std::string>()));
-        std::cout << a << "\n";
-        ctrlSock_->sendMsg("OK");
+        int to_uid = std::stoi(j["to_uid"].get<std::string>());
+        reply["status"] = friendManager.request(to_uid, self_uid);
+        ctrlSock_->sendMsg(reply.dump());
       } else if(j["action"] == "del") {
-        friendManager.del(std::stoi(j["from_uid"].get<std::string>()),std::stoi(j["to_uid"].get<std::string>()));
-        ctrlSock_->sendMsg("OK");
-      } else if(j["action"] == "check_request") {
-        ctrlSock_->sendMsg("OK");
-        std::vector<int> list = friendManager.list_request(std::stoi(j["from_uid"].get<std::string>()));
-        
-        for(int uid : list) {
-          User* res = usrManager.getUser(uid);
-          std::string back = std::to_string(res->uid) + "  " + res->username;
-          ctrlSock_->sendMsg(back);
-        }
-        ctrlSock_->sendMsg("finish");
+        int to_uid = std::stoi(j["to_uid"].get<std::string>());
+        friendManager.del(self_uid, to_uid);
+        reply["status"] = 0;
+        ctrlSock_->sendMsg(reply.dump());
       } else if(j["action"] == "agree") {
-        friendManager.agree(std::stoi(j["from_uid"].get<std::string>()),std::stoi(j["to_uid"].get<std::string>()));
-        ctrlSock_->sendMsg("OK");
+        int to_uid = std::stoi(j["to_uid"].get<std::string>());
+        friendManager.agree(self_uid, to_uid);
+        reply["status"] = 0;
+        ctrlSock_->sendMsg(reply.dump());
       } else if(j["action"] == "reject") {
-        friendManager.reject(std::stoi(j["from_uid"].get<std::string>()),std::stoi(j["to_uid"].get<std::string>()));
-        ctrlSock_->sendMsg("OK");
+        int to_uid = std::stoi(j["to_uid"].get<std::string>());
+        friendManager.reject(self_uid, to_uid);
+        reply["status"] = 0;
+        ctrlSock_->sendMsg(reply.dump());
       } else if(j["action"] == "list_friend") {
-        std::vector<int> list = friendManager.list_friend(std::stoi(j["from_uid"].get<std::string>()));
-        ctrlSock_->sendMsg("OK");
+        reply["status"] = 0;
+        auto list = friendManager.list_friend(self_uid);
+        reply["friends"] = nlohmann::json::array();
         for(int uid : list) {
-          User* res = usrManager.getUser(uid);
-          std::string back = std::to_string(res->uid) + "  " + res->username;
-          ctrlSock_->sendMsg(back);
+          User *u = usrManager.getUser(uid);
+          if(!u) continue;
+          reply["friends"].push_back({
+            {"uid", u->uid},
+            {"username", u->username}
+          });
         }
-        ctrlSock_->sendMsg("finish");
-      } else {
-        ctrlSock_->sendMsg("非预期的请求");
+        ctrlSock_->sendMsg(reply.dump());
+      } else if(j["action"] == "check_request") {
+        reply["status"] = 0;
+        auto list = friendManager.list_request(self_uid);
+        reply["requests"] = nlohmann::json::array();
+        for(int uid : list) {
+          User *u = usrManager.getUser(uid);
+          if (!u) continue;
+          reply["requests"].push_back({
+            {"uid", u->uid},
+            {"username", u->username}
+          });
+        }
+        ctrlSock_->sendMsg(reply.dump());
+      }
+      else {
+        reply["status"] = -1;
+        reply["message"] = "unknown action";
+
+        ctrlSock_->sendMsg(reply.dump());
       }
       continue;
     }
@@ -354,8 +372,9 @@ bool Session::doPASV() {
 
 int start_server() {
   std::filesystem::create_directories(SAVEPATH);
-  // chdir(getenv("HOME"));
+
   usrManager.load(USRDATA);
+  friendManager.load(FRIENDDATA);
   int max_uid = usrManager.getMaxUid();
   get_uid.init(max_uid + 1);
   TcpServer server;
@@ -374,7 +393,8 @@ int start_server() {
     } else {
       std::cout << "[PASS] client connected\n";
     }
-    std::thread([sock = std::move(sock)]() mutable {
+    std::thread([sock = std::move(sock)]() 
+      mutable {
         Session session(std::move(sock));
         session.start();
       }
