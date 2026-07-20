@@ -7,7 +7,7 @@ const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
 bool UsrManager::regis(const std::string& username,const std::string& password,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
 
-  if (name_map_.count(username)) {
+  if(name_map.count(username)) {
     return false;
   }
 
@@ -17,8 +17,8 @@ bool UsrManager::regis(const std::string& username,const std::string& password,i
     password
   };
 
-  uid_map_[uid] = user;
-  name_map_[username] = uid;
+  uid_map[uid] = user;
+  name_map[username] = uid;
 
   return true;
 }
@@ -26,14 +26,14 @@ bool UsrManager::regis(const std::string& username,const std::string& password,i
 bool UsrManager::login(const std::string& username,const std::string& password,int& out_uid) {
   std::lock_guard<std::mutex> lock(mtx_);
 
-  auto iter = name_map_.find(username);
-  if(iter == name_map_.end()) {
+  auto iter = name_map.find(username);
+  if(iter == name_map.end()) {
     return false;
   }
 
   int uid = iter->second;
-  auto uiter = uid_map_.find(uid);
-  if(uiter == uid_map_.end()) {
+  auto uiter = uid_map.find(uid);
+  if(uiter == uid_map.end()) {
     return false;
   }
 
@@ -53,8 +53,8 @@ bool UsrManager::load(const std::string& path) {
   nlohmann::json j;
   ifs >> j;
 
-  uid_map_.clear();
-  name_map_.clear();
+  uid_map.clear();
+  name_map.clear();
 
   for(auto& item : j) {
     User user;
@@ -63,8 +63,8 @@ bool UsrManager::load(const std::string& path) {
     user.username = item["username"];
     user.password = item["password"];
 
-    uid_map_[user.uid] = user;
-    name_map_[user.username] = user.uid;
+    uid_map[user.uid] = user;
+    name_map[user.username] = user.uid;
   }
 
   return true;
@@ -73,7 +73,7 @@ bool UsrManager::load(const std::string& path) {
 bool UsrManager::save(const std::string& path) {
   nlohmann::json j = nlohmann::json::array();
 
-  for(auto& [uid, user] : uid_map_) {
+  for(auto& [uid, user] : uid_map) {
     j.push_back({
       {"uid",user.uid},
       {"username",user.username},
@@ -93,7 +93,7 @@ bool UsrManager::save(const std::string& path) {
 int UsrManager::getMaxUid() {
   int max_uid = 10000;
 
-  for(auto& [uid, user] : uid_map_) {
+  for(auto& [uid, user] : uid_map) {
     if(uid > max_uid) max_uid = uid;
   }
 
@@ -101,7 +101,7 @@ int UsrManager::getMaxUid() {
 }
 
 bool UsrManager::isExist(const std::string& username) {
-  if(name_map_.count(username)) {
+  if(name_map.count(username)) {
     return true;
   }
   return false;
@@ -110,8 +110,8 @@ bool UsrManager::isExist(const std::string& username) {
 User* UsrManager::getUser(int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
 
-  auto iter = uid_map_.find(uid);
-  if(iter == uid_map_.end()) {
+  auto iter = uid_map.find(uid);
+  if(iter == uid_map.end()) {
     return nullptr;
   }
 
@@ -266,9 +266,19 @@ void SessionManager::bindUser(int user_id,std::shared_ptr<TcpSocket> sock) {
   user_to_sock_[user_id] = std::move(sock);
 }
 
+bool SessionManager::isOnline(int uid) {
+
+  return true;
+}
+
+bool SessionManager::sendTo(int uid,const nlohmann::json& j) {
+
+  return true;
+}
+
 std::shared_ptr<TcpSocket> SessionManager::getSock(int user_id) {
   std::lock_guard<std::mutex> lock(mtx_);
   auto it = user_to_sock_.find(user_id);
-  if (it == user_to_sock_.end()) return nullptr;
+  if(it == user_to_sock_.end()) return nullptr;
   return it->second;
 }

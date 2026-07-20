@@ -1,5 +1,5 @@
 #include "server.h"
-#include "user.h"
+#include "shared.h"
 #include "manager.h"
 
 const std::string SAVEPATH = "./data";
@@ -172,21 +172,21 @@ void Session::start() {
       reply["action"] = j["action"];
       if(j["action"] == "request") {
         int to_uid = std::stoi(j["to_uid"].get<std::string>());
-        reply["status"] = friendManager.request(to_uid, self_uid);
+        reply["status"] = friendManager.request(to_uid,self_uid);
         ctrlSock_->sendMsg(reply.dump());
       } else if(j["action"] == "del") {
         int to_uid = std::stoi(j["to_uid"].get<std::string>());
-        friendManager.del(self_uid, to_uid);
+        friendManager.del(self_uid,to_uid);
         reply["status"] = 0;
         ctrlSock_->sendMsg(reply.dump());
       } else if(j["action"] == "agree") {
         int to_uid = std::stoi(j["to_uid"].get<std::string>());
-        friendManager.agree(self_uid, to_uid);
+        friendManager.agree(self_uid,to_uid);
         reply["status"] = 0;
         ctrlSock_->sendMsg(reply.dump());
       } else if(j["action"] == "reject") {
         int to_uid = std::stoi(j["to_uid"].get<std::string>());
-        friendManager.reject(self_uid, to_uid);
+        friendManager.reject(self_uid,to_uid);
         reply["status"] = 0;
         ctrlSock_->sendMsg(reply.dump());
       } else if(j["action"] == "list_friend") {
@@ -197,8 +197,8 @@ void Session::start() {
           User *u = usrManager.getUser(uid);
           if(!u) continue;
           reply["friends"].push_back({
-            {"uid", u->uid},
-            {"username", u->username}
+            {"uid",u->uid},
+            {"username",u->username}
           });
         }
         ctrlSock_->sendMsg(reply.dump());
@@ -208,15 +208,14 @@ void Session::start() {
         reply["requests"] = nlohmann::json::array();
         for(int uid : list) {
           User *u = usrManager.getUser(uid);
-          if (!u) continue;
+          if(!u) continue;
           reply["requests"].push_back({
-            {"uid", u->uid},
-            {"username", u->username}
+            {"uid",u->uid},
+            {"username",u->username}
           });
         }
         ctrlSock_->sendMsg(reply.dump());
-      }
-      else {
+      } else {
         reply["status"] = -1;
         reply["message"] = "unknown action";
 

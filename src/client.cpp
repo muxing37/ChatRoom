@@ -1,8 +1,8 @@
 #include "client.h"
-#include "user.h"
+#include "shared.h"
 
 #define MAX_PATH 1024
-// int running=0;
+
 std::queue<std::string> replyQueue;
 std::mutex replyMutex;
 std::condition_variable replyCv;
@@ -30,10 +30,10 @@ public:
         title = "好友管理";
         break;
 
-      case ClientState::PRIVATE_CHAT:
-        menu = &menu_private_chat_;
-        title = "私聊";
-        break;
+      // case ClientState::PRIVATE_CHAT:
+      //   menu = &menu_private_chat_;
+      //   title = "私聊";
+      //   break;
 
       case ClientState::GROUP_MENU:
         menu = &menu_group_;
@@ -80,11 +80,11 @@ private:
     "返回主菜单"
   };
 
-  const std::vector<std::string> menu_private_chat_ = {
-    "选择好友聊天",
-    "查看聊天记录",
-    "返回主菜单"
-  };
+  // const std::vector<std::string> menu_private_chat_ = {
+  //   "选择好友聊天",
+  //   "查看聊天记录",
+  //   "返回主菜单"
+  // };
 
   const std::vector<std::string> menu_group_ = {
     "查看群聊",
@@ -263,27 +263,30 @@ void sendthread(TcpSocket& sock,User usr) {
           std::cout << x["uid"] << " " << x["username"] << std::endl;
         }
         std::string uid;
-        while (uid != "0") {
+        while(uid != "0") {
           std::cout << "请输入一个用户id(输入“0”退出):\n";
           int c = 0;
           std::cin >> c;
           uid = std::to_string(c);
 
-          if (uid == "0") break;
+          if(uid == "0") break;
 
           int ch = 0;
-          while (ch < 1 || ch > 3) {
+          while(ch < 1 || ch > 3) {
             std::cout << "1.同意\n" << "2.拒绝\n" << "3.取消\n";
             std::cin >> ch;
           }
 
-          if (ch == 3) {
+          nlohmann::json js;
+          js["type"] = "friend";
+          if(ch == 1) {
+            js["action"] = "agree";
+          } else if(ch == 2) {
+            js["action"] = "reject";
+          } else {
             continue;
           }
 
-          nlohmann::json js;
-          js["type"] = "friend";
-          js["action"] = (ch == 1 ? "agree" : "reject");
           js["from_uid"] = std::to_string(usr.uid);
           js["to_uid"] = uid;
 
@@ -291,8 +294,8 @@ void sendthread(TcpSocket& sock,User usr) {
 
           std::string res = waitReply();
 
-          if (res == "OK") {
-            if (ch == 1) {
+          if(res == "OK") {
+            if(ch == 1) {
               std::cout << "已同意好友申请\n";
             } else {
               std::cout << "已拒绝好友申请\n";
@@ -300,11 +303,9 @@ void sendthread(TcpSocket& sock,User usr) {
           } else {
             std::cout << res << std::endl;
           }
-
           uid.clear();
         }
       } else if(choice1 == 5) {
-        // continue;
         break;
       }
     }
