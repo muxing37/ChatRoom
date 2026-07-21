@@ -99,60 +99,128 @@ std::shared_ptr<TcpSocket> TcpServer::acceptConn() {
   return std::make_unique<TcpSocket>(fd);
 }
 
+nlohmann::json makeReply(const nlohmann::json& j,int status) {
+  nlohmann::json reply;
+  reply["msg_type"]="reply";
+  reply["request_id"] = j["request_id"];
+  reply["status"]=status;
+  reply["time"] =time(nullptr);
+  return reply;
+}
+
 void Session::start() {
   User* usr;
   std::string recv;
   while(true) {
-    int uid;
     std::string res;
-    if(ctrlSock_->recvMsg(res) != NetResult::OK) return;
-    if(res.empty()) {
-      NetResult ret = ctrlSock_->sendMsg("error");
-      if(ret != NetResult::OK) {
-        // exit(0);
-        return;
-      } else {
-        continue;
-      }
-    }
-    nlohmann::json j = nlohmann::json::parse(res);
-    // std::cout << res << std::endl;
-    if(j["type"] != "user") {
-      ctrlSock_->sendMsg("非预期的请求");
+    if(ctrlSock_->recvMsg(res)!=NetResult::OK) return;
+    if(res.empty()) continue;
+
+    auto j = nlohmann::json::parse(res);
+
+    if(j["type"]!="user") {
+      auto reply=makeReply(j,1);
+      reply["error"]="invalid type";
+      ctrlSock_->sendMsg(reply.dump());
       continue;
     }
-    if(j["action"] == "register") {
-      if(usrManager.isExist(j["username"])) {
-        ctrlSock_->sendMsg("error");
-        continue;
-      } else {
-        uid = get_uid.get();
-      }
-
-      if(usrManager.regis(j["username"],j["password"],uid)) {
-        ctrlSock_->sendMsg(std::to_string(uid));
-        usr = usrManager.getUser(uid);
-        usrManager.save(USRDATA);
-        break;
-      } else {
-        ctrlSock_->sendMsg("error");
+    nlohmann::json reply= makeReply(j,1);
+    int uid;
+    if(j["action"]=="register") {
+      std::string username = j["data"]["username"];
+      std::string password = j["data"]["password"];
+      if(usrManager.isExist(username)) {
+        reply["error"] ="username exists";
+        ctrlSock_->sendMsg(reply.dump());
         continue;
       }
-      // sessionManager.bindUser(usr.uid,ctrlSock_);
+      uid=get_uid.get();
+      if(!usrManager.regis(username,password,uid)) {
+        // reply["error"] = "register failed";
+        ctrlSock_->sendMsg(reply.dump());
+        continue;
+      }
+      usr = usrManager.getUser(uid);
+      usrManager.save(USRDATA);
+      reply["status"]=0;
+      reply["data"]={
+        {"uid",uid},
+        {"username",username}
+      };
+      ctrlSock_->sendMsg(reply.dump());
+      break;
     } else if(j["action"] == "login") {
-      if(usrManager.login(j["username"],j["password"],uid)) {
-        ctrlSock_->sendMsg(std::to_string(uid));
-        usr = usrManager.getUser(uid);
-        break;
-      } else {
-        ctrlSock_->sendMsg("error");
+      std::string username = j["data"]["username"];
+      std::string password = j["data"]["password"];
+      if(!usrManager.login(username,password,uid)) {
+        reply["error"] ="username or password wrong";
+        ctrlSock_->sendMsg(reply.dump());
         continue;
       }
+      usr = usrManager.getUser(uid);
+      reply["status"]=0;
+      reply["data"]={
+        {"uid",uid},
+        {"username",username}
+      };
+      ctrlSock_->sendMsg(reply.dump());
+      break;
     } else {
-      ctrlSock_->sendMsg("非预期的请求");
+      // reply["error"] ="unknown action";
+      ctrlSock_->sendMsg(reply.dump());
     }
-    // break;
   }
+  // while(true) {
+  //   int uid;
+  //   std::string res;
+  //   if(ctrlSock_->recvMsg(res) != NetResult::OK) return;
+  //   if(res.empty()) {
+  //     NetResult ret = ctrlSock_->sendMsg("error");
+  //     if(ret != NetResult::OK) {
+  //       // exit(0);
+  //       return;
+  //     } else {
+  //       continue;
+  //     }
+  //   }
+  //   nlohmann::json j = nlohmann::json::parse(res);
+  //   // std::cout << res << std::endl;
+  //   if(j["type"] != "user") {
+  //     ctrlSock_->sendMsg("非预期的请求");
+  //     continue;
+  //   }
+  //   if(j["action"] == "register") {
+  //     if(usrManager.isExist(j["username"])) {
+  //       ctrlSock_->sendMsg("error");
+  //       continue;
+  //     } else {
+  //       uid = get_uid.get();
+  //     }
+
+  //     if(usrManager.regis(j["username"],j["password"],uid)) {
+  //       ctrlSock_->sendMsg(std::to_string(uid));
+  //       usr = usrManager.getUser(uid);
+  //       usrManager.save(USRDATA);
+  //       break;
+  //     } else {
+  //       ctrlSock_->sendMsg("error");
+  //       continue;
+  //     }
+  //     // sessionManager.bindUser(usr.uid,ctrlSock_);
+  //   } else if(j["action"] == "login") {
+  //     if(usrManager.login(j["username"],j["password"],uid)) {
+  //       ctrlSock_->sendMsg(std::to_string(uid));
+  //       usr = usrManager.getUser(uid);
+  //       break;
+  //     } else {
+  //       ctrlSock_->sendMsg("error");
+  //       continue;
+  //     }
+  //   } else {
+  //     ctrlSock_->sendMsg("非预期的请求");
+  //   }
+  //   // break;
+  // }
   sessionManager.bindUser(usr->uid,ctrlSock_);
   while(true) {
     // std::cout << usr->uid << std::endl;
@@ -202,7 +270,7 @@ void Session::start() {
           });
         }
         ctrlSock_->sendMsg(reply.dump());
-      } else if(j["action"] == "check_request") {
+      } else if(j["action"] == "list_request") {
         reply["status"] = 0;
         auto list = friendManager.list_request(self_uid);
         reply["requests"] = nlohmann::json::array();

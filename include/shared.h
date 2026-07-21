@@ -1,11 +1,18 @@
 #pragma once
 #include <iostream>
 #include <string>
+#include <cstdint>
 
 struct User {
     int uid;
     std::string username;
     std::string password;
+};
+
+struct Account {
+    int uid;
+    std::string username;
+    std::string password_hash;
 };
 
 struct Message {
@@ -21,10 +28,10 @@ struct Message {
     int status;  // 0:待发送 1:已送达 2:已读
 };
 
-enum class ClientState {
-    LOGIN,
-    MAIN_MENU,
-    FRIEND_MENU,
-    PRIVATE_CHAT,
-    GROUP_MENU
-};
+// enum class ClientState {
+//     LOGIN,
+//     MAIN_MENU,
+//     FRIEND_MENU,
+//     PRIVATE_CHAT,
+//     GROUP_MENU
+// };

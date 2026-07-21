@@ -101,6 +101,7 @@ int UsrManager::getMaxUid() {
 }
 
 bool UsrManager::isExist(const std::string& username) {
+  std::lock_guard<std::mutex> lock(mtx_);
   if(name_map.count(username)) {
     return true;
   }
@@ -271,7 +272,7 @@ bool SessionManager::isOnline(int uid) {
   return true;
 }
 
-bool SessionManager::sendTo(int uid,const nlohmann::json& j) {
+bool SessionManager::sendTo(int uid,const Message& msg) {
 
   return true;
 }
