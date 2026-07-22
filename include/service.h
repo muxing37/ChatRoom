@@ -26,6 +26,7 @@ public:
   bool hasFriend(int uid);
   std::optional<User> getFriend(int uid);
   void addFriend(const User& user);
+  void addFriendRequest(const User& user);
   void delFriend(int uid);
   void setFriendRequests(const std::vector<User>& list);
   std::vector<User> getFriendRequests();

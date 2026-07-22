@@ -164,7 +164,7 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
   
   uint32_t l=ntohl(len);
 
-  std::cout << "host len = " << l << std::endl;
+  // std::cout << "host len = " << l << std::endl;
 
   const uint32_t MAX_LEN=100*1024*1024;
 
@@ -184,9 +184,9 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
 
   std::cout << "[RECV fd=" << sockfd_ << "] " << "\"" << msg << "\"" << std::endl;
 
-  std::cout << "data: ";
-  for(unsigned char c : msg) printf("%02X ", c);
-  std::cout << std::endl;
+  // std::cout << "data: ";
+  // for(unsigned char c : msg) printf("%02X ", c);
+  // std::cout << std::endl;
 
   return NetResult::OK;
 }

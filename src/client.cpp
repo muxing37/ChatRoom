@@ -160,25 +160,22 @@ void CliUI::friendMenu() {
 }
 
 void CliUI::showFriendList() {
-  if(!friendService_.listFriend()) {
+  if(friendService_.listFriend() != 0) {
     std::cout<<"获取好友列表失败\n";
     return;
   }
   auto friends=ctx_.getFriendList();
-  std::cout<<"\n好友列表\n";
+  std::cout<<"\n好友列表:\n";
 
   for(auto &u:friends) {
-    std::cout
-      <<u.uid<<" "
-      <<u.username
-      <<'\n';
+    std::cout <<u.uid<<" " <<u.username <<'\n';
   }
 }
 
 void CliUI::addFriend() {
   int uid=std::stoi(inputString("请输入uid："));
 
-  if(friendService_.request(uid)) {
+  if(friendService_.request(uid) == 0) {
     std::cout<<"好友申请已发送\n";
   } else {
     std::cout<<"发送失败\n";
@@ -188,7 +185,7 @@ void CliUI::addFriend() {
 void CliUI::deleteFriend() {
   int uid=std::stoi(inputString("请输入uid："));
 
-  if(friendService_.del(uid)) {
+  if(friendService_.del(uid) == 0) {
     std::cout<<"删除成功\n";
   } else {
     std::cout<<"删除失败\n";
@@ -196,18 +193,17 @@ void CliUI::deleteFriend() {
 }
 
 void CliUI::showFriendRequest() {
-  if(!friendService_.listRequest()) {
+  if(friendService_.listRequest() != 0) {
     std::cout<<"获取好友申请失败\n";
     return;
   }
 
-  auto list=ctx_.getFriendRequests();
+  auto list = ctx_.getFriendRequests();
 
-  for(auto &u:list) {
-    std::cout
-      <<u.uid<<" "
-      <<u.username
-      <<'\n';
+  std::cout << "好友申请:" << std::endl;
+
+  for(auto &u : list) {
+    std::cout << u.uid << " " <<u.username <<'\n';
   }
 
   while(true) {
@@ -328,7 +324,7 @@ int start_client() {
   std::cout << "[PASS] connected to server\n";
   auto sock = client.getSocket();
   // auto sock = std::make_shared<TcpSocket>(fd);
-  if (!sock) {
+  if(!sock) {
     std::cerr << "[FAIL] socket null\n";
     return 1;
   }
@@ -346,71 +342,6 @@ AuthService authService(network,ctx);
 FriendService friendService(network,ctx);
 CliUI menu(authService,friendService,ctx);
   network.start();
-//----------------------
-  User usr;
-  // std::string choice;
-  // while(choice != "1" && choice != "2") {
-  //   std::cin >> choice;
-  // }
-
-  // while(choice == "1") {
-  //   if(usr.username.empty()) {
-  //     std::cout << "请输入用户名:\n";
-  //     std::cin >> usr.username ;
-  //     if(usr.username.empty()) continue;
-  //   }
-  //   if(usr.password.empty()) {
-  //     std::cout << "请输入密码:\n";
-  //     std::cin >> usr.password;
-  //     if(usr.username.empty()) continue;
-  //   }
-  //   nlohmann::json j;
-  //   j["type"] = "user";
-  //   j["action"] = "login";
-  //   j["username"] = usr.username;
-  //   j["password"] = usr.password;
-  //   sock->sendMsg(j.dump());
-  //   std::string id;
-  //   sock->recvMsg(id);
-  //   if(id == "error") {
-  //     std::cout << "用户名或密码错误，请重试\n";
-  //     usr.username.clear();
-  //     usr.password.clear();
-  //     continue;
-  //   }
-  //   usr.uid = std::stoi(id);
-  //   break;
-  // }
-
-  // while(choice == "2") {
-  // // while(true) {
-  //   if(usr.username.empty()) {
-  //     std::cout << "请输入用户名:\n";
-  //     std::cin >> usr.username ;
-  //     if(usr.username.empty()) continue;
-  //   }
-  //   if(usr.password.empty()) {
-  //     std::cout << "请输入密码:\n";
-  //     std::cin >> usr.password;
-  //     if(usr.username.empty()) continue;
-  //   }
-  //   nlohmann::json j;
-  //   j["type"] = "user";
-  //   j["action"] = "register";
-  //   j["username"] = usr.username;
-  //   j["password"] = usr.password;
-  //   sock->sendMsg(j.dump());
-  //   std::string id;
-  //   sock->recvMsg(id);
-  //   if(id == "error") {
-  //     std::cout << "用户名已存在，请重试\n";
-  //     usr.username.clear();
-  //     usr.password.clear();
-  //     continue;
-  //   }
-  //   usr.uid = std::stoi(id);
-  //   break;
-  // }
 
   menu.run();
   

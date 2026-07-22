@@ -13,13 +13,16 @@ User ClientContext::getSelf() {
 void ClientContext::setFriendList(const std::vector<User>& list) {
   std::lock_guard lock(mtx_);
   friends_.clear();
-  for(auto &u:list) friends_[u.uid]=u;
+  for(auto &u : list) friends_[u.uid]=u;
 }
 
 std::vector<User> ClientContext::getFriendList() {
   std::lock_guard lock(mtx_);
   std::vector<User> res;
-  for(auto &[id,u]:friends_) res.push_back(u);
+  for(auto &[id,u] : friends_) {
+    std::cout << u.username << std::endl; 
+    res.push_back(u);
+  }
   return res;
 }
 
@@ -33,6 +36,11 @@ std::optional<User> ClientContext::getFriend(int uid) {
   auto it=friends_.find(uid);
   if(it==friends_.end()) return std::nullopt;
   return it->second;
+}
+
+void ClientContext::addFriendRequest(const User& user) {
+  std::lock_guard lock(mtx_);
+  friendRequests_[user.uid]=user;
 }
 
 void ClientContext::addFriend(const User& user) {
@@ -77,6 +85,8 @@ int FriendService::del(int uid) {
   j["data"]["from_uid"] = ctx_.getSelf().uid;
   j["data"]["to_uid"] = uid;
   auto reply = network_.request(j);
+
+
   return reply["status"];
 }
 
@@ -84,19 +94,21 @@ int FriendService::listFriend() {
   nlohmann::json j;
   j["type"] = "friend";
   j["action"] = "list_friend";
-  j["data"]["uid"] = ctx_.getSelf().uid;
+  j["data"]["from_uid"] = ctx_.getSelf().uid;
   auto reply = network_.request(j);
   if(reply["status"] != 0) return reply["status"];
 
   // ctx_.clearFriends();
+  std::vector<User> list;
 
   for(auto& x : reply["data"]["friends"]) {
     User user;
     user.uid = x["uid"];
     user.username = x["username"];
-    ctx_.addFriend(user);
+    list.push_back(user);
+    // ctx_.addFriend(user);
   }
-
+  ctx_.setFriendList(list);
   return reply["status"];
 }
 
@@ -104,19 +116,21 @@ int FriendService::listRequest() {
   nlohmann::json j;
   j["type"] = "friend";
   j["action"] = "list_request";
-  j["data"]["uid"] = ctx_.getSelf().uid;
+  j["data"]["from_uid"] = ctx_.getSelf().uid;
   auto reply = network_.request(j);
   if(reply["status"] != 0) return reply["status"];
 
   // ctx_.clearFriends();
-
+  std::vector<User> list;
   for(auto& x : reply["data"]["request"]) {
     User user;
+    // std::cout << x["username"] << std::endl;
     user.uid = x["uid"];
     user.username = x["username"];
-    ctx_.addFriend(user);
+    // ctx_.addFriendRequest(user);
+    list.push_back(user);
   }
-
+  ctx_.setFriendRequests(list);
   return reply["status"];
 }
 
