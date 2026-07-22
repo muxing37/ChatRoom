@@ -19,6 +19,7 @@ add_executable(client
     src/client.cpp
     src/socket.cpp
     src/service.cpp
+    src/cliui.cpp
 )
 
 find_package(PkgConfig REQUIRED)

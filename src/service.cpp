@@ -98,7 +98,6 @@ int FriendService::listFriend() {
   auto reply = network_.request(j);
   if(reply["status"] != 0) return reply["status"];
 
-  // ctx_.clearFriends();
   std::vector<User> list;
 
   for(auto& x : reply["data"]["friends"]) {
@@ -106,7 +105,6 @@ int FriendService::listFriend() {
     user.uid = x["uid"];
     user.username = x["username"];
     list.push_back(user);
-    // ctx_.addFriend(user);
   }
   ctx_.setFriendList(list);
   return reply["status"];
@@ -120,14 +118,11 @@ int FriendService::listRequest() {
   auto reply = network_.request(j);
   if(reply["status"] != 0) return reply["status"];
 
-  // ctx_.clearFriends();
   std::vector<User> list;
   for(auto& x : reply["data"]["request"]) {
     User user;
-    // std::cout << x["username"] << std::endl;
     user.uid = x["uid"];
     user.username = x["username"];
-    // ctx_.addFriendRequest(user);
     list.push_back(user);
   }
   ctx_.setFriendRequests(list);
