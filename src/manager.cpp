@@ -4,6 +4,14 @@ const std::string SAVEPATH = "./data";
 const std::string USRDATA = SAVEPATH + "/usrdata.json";
 const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
 
+std::string privateId(int uid1, int uid2) {
+  if(uid1 > uid2) std::swap(uid1, uid2);
+  return "private_" + std::to_string(uid1) + "_" + std::to_string(uid2);
+}
+std::string groupId(int groupId) {
+  return "group_" + std::to_string(groupId);
+}
+
 bool UsrManager::regis(const std::string& username,const std::string& password,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
 
@@ -257,6 +265,52 @@ bool FriendManager::save(const std::string& path) {
   return true;
 }
 
+int MessageManager::add(const Message& msg) {
+  std::lock_guard lock(mtx_);
+  std::string cvs_id = privateId(msg.from_uid,msg.target_id);
+  history_[cvs_id].push_back(msg);
+  return 0;
+}
+
+int MessageManager::addOfflineMsg(const Message& msg) {
+  std::lock_guard lock(mtx_);
+  offline_msg_[msg.target_id].push_back(msg);
+  return true;
+}
+
+int MessageManager::delOfflineMsg(const std::string& msg_id) {
+
+}
+
+std::vector<Message> MessageManager::getOfflineMsg(int uid) {
+  std::lock_guard lock(mtx_);
+  auto it = offline_msg_.find(uid);
+  if(it == offline_msg_.end()) {
+    return {};
+  }
+  return it->second;
+}
+
+std::vector<Message> MessageManager::getHistory(int uid1,int uid2) {
+  std::lock_guard lock(mtx_);
+  std::string cvs_id = privateId(uid1,uid2);
+  auto it = history_.find(cvs_id);
+  if(it == history_.end()) {
+    return {};
+  }
+  return it->second;
+}
+
+bool MessageManager::save(const std::string& path) {
+  std::lock_guard lock(mtx_);
+
+}
+
+bool MessageManager::load(const std::string& path) {
+  std::lock_guard lock(mtx_);
+
+}
+
 void SessionManager::unbindUser(int user_id) {
   std::lock_guard<std::mutex> lock(mtx_);
   user_to_sock_.erase(user_id);
@@ -268,13 +322,22 @@ void SessionManager::bindUser(int user_id,std::shared_ptr<TcpSocket> sock) {
 }
 
 bool SessionManager::isOnline(int uid) {
-
-  return true;
+  std::lock_guard lock(mtx_);
+  return user_to_sock_.count(uid);
 }
 
-bool SessionManager::sendTo(int uid,const Message& msg) {
-
-  return true;
+bool SessionManager::sendTo(int to_uid,const Message& msg) {
+  auto sock = getSock(to_uid);
+  if(!sock) return -1;
+  nlohmann::json push;
+  push["msg_type"] = "push";
+  push["type"] = "chat";
+  push["action"] = "private_chat";
+  push["data"] = msg;
+  if(sock->sendMsg(push.dump()) != NetResult::OK) {
+    return -1;
+  }
+  return 0;
 }
 
 std::shared_ptr<TcpSocket> SessionManager::getSock(int user_id) {

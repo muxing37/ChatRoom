@@ -1,5 +1,6 @@
 #include "service.h"
 
+// 用户本人
 void ClientContext::setSelf(const User& user) {
   std::lock_guard lock(mtx_);
   self_=user;
@@ -9,7 +10,7 @@ User ClientContext::getSelf() {
   std::lock_guard lock(mtx_);
   return self_;
 }
-
+// 好友相关
 void ClientContext::setFriendList(const std::vector<User>& list) {
   std::lock_guard lock(mtx_);
   friends_.clear();
@@ -65,6 +66,40 @@ std::vector<User> ClientContext::getFriendRequests() {
   for(auto &[id,u]:friendRequests_) res.push_back(u);
   return res;
 }
+// 聊天相关
+void ClientContext::addMessage(const Message& msg) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  if(msg.chat_type == "private") {
+    if(msg.from_uid == self_.uid) {
+      msgs_[msg.target_id].push_back(msg);
+    } else {
+      msgs_[msg.from_uid].push_back(msg);
+    }
+  } else if(msg.chat_type == "group") {
+    msgs_[msg.target_id].push_back(msg);
+  }
+}
+
+std::vector<Message> ClientContext::getMessage(int id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = msgs_.find(id);
+
+  if(it == msgs_.end()) return {};
+  return it->second;
+}
+
+void ClientContext::setMessage(int id,const std::vector<Message>& msgs) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  msgs_[id] = msgs;
+}
+
+void ClientContext::loadMoreMessages(int uid,const std::vector<Message>& msgs) {
+
+}
+// 群组相关
+
+
+//----------------------------------------------------
 
 FriendService::FriendService(ClientNetwork& network,ClientContext& context) : network_(network),ctx_(context) {}
 
@@ -166,11 +201,11 @@ void ClientNetwork::start() {
 
 void ClientNetwork::stop() {
   running_ = false;
-  if(sock_) sock_->~TcpSocket();
+  if(sock_) sock_->closefd();
   if(recvThread_.joinable()) recvThread_.join();
 }
 
-bool ClientNetwork::send(json j) {
+bool ClientNetwork::send(const json& j) {
   if(sock_->sendMsg(j.dump()) == NetResult::OK) {
     return true;
   } else {
@@ -186,9 +221,13 @@ nlohmann::json ClientNetwork::request(json j) {
   send(j);
 
   std::unique_lock lock(replyMutex_);
-  replyCv_.wait(lock,[&]{
-    return replies_.count(id);
-  });
+  if(!replyCv_.wait_for(lock,std::chrono::seconds(30),
+  [&]{return replies_.count(id);})) {
+    return {
+      {"status",-1},
+      {"error","timeout"}
+    };
+  }
   auto reply = replies_[id];
   replies_.erase(id);
   return reply;
@@ -219,7 +258,8 @@ void ClientNetwork::dispatch(const json& j) {
 
   if(type == "reply") {
     pushReply(j);
-  } else if(type == "push") {
+  }
+  if(type == "push") {
     if(pushHandler_) pushHandler_(j);
   }
 }
@@ -270,14 +310,81 @@ bool AuthService::regis(const std::string& username,const std::string& password)
     {"username",username},
     {"password",password}
   };
-  auto reply=network_.request(j);
+  auto reply = network_.request(j);
 
   if(reply["status"] != 0) {
     return false;
   }
   User user;
   user.uid = reply["data"]["uid"];
-  user.username=username;
+  user.username = username;
   ctx_.setSelf(user);
   return true;
 }
+
+PrivateChatService::PrivateChatService(ClientNetwork& network,ClientContext& ctx) : network_(network),ctx_(ctx){}
+
+int PrivateChatService::sendPrivateMessage(int to_uid,const std::string& text) {
+  nlohmann::json j;
+  // j["msg_type"] = "request";
+  // j["request_id"] = network_.;
+  // std::string message_id;
+  // message_id = getMsgId();
+  j["type"] = "chat";
+  j["action"] = "private_chat";
+  j["data"] = {
+    // {"message_id",message_id},
+    {"type",text},
+    {"chat_type","private"},
+    {"from_uid",ctx_.getSelf().uid},
+    {"to_uid",to_uid},
+    {"content",text},
+    {"time",time(nullptr)}
+  };
+  auto reply = network_.request(j);
+  if(reply["status"] != 0) {
+    return -1;
+  }
+  auto data = reply["data"];
+  Message msg;
+  msg.message_id = data["message_id"];
+  msg.type = data["type"];
+  msg.chat_type = data["chat_type"];
+  msg.from_uid = ctx_.getSelf().uid;
+  msg.target_id = to_uid;
+  msg.content = text;
+  msg.time = data["time"];
+  ctx_.addMessage(msg);
+  // ctx_.addMessage();
+  return 0;
+}
+
+int PrivateChatService::syncHistory(int uid) {
+  nlohmann::json j;
+  j["type"] = "chat";
+  j["action"] = "private_history";
+  j["data"] = {
+    {"from_uid",uid}
+  };
+  auto reply = network_.request(j);
+  if(reply["status"] != 0) return -1;
+  std::vector<Message> msgs;
+  for(auto t : reply["data"]["messages"]) {
+    msgs.push_back(t.get<Message>());
+  }
+  ctx_.setMessage(uid,msgs);
+  return 0;
+}
+
+std::vector<Message> PrivateChatService::getMessages(int uid) {
+  return ctx_.getMessage(uid);
+}
+
+void PrivateChatService::gotPush(const nlohmann::json& push) {
+  auto msg = push["data"].get<Message>();
+  ctx_.addMessage(msg);
+}
+
+// std::string PrivateChatService::getMsgId() {
+
+// }

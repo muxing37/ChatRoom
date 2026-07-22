@@ -7,6 +7,11 @@ TcpSocket::~TcpSocket() {
   sockfd_ = -1;
 }
 
+void TcpSocket::closefd() {
+  close(sockfd_);
+  sockfd_ = -1;
+}
+
 uint64_t htonll(uint64_t num) {
   uint32_t high = htonl((uint32_t)(num >> 32));
   uint32_t low  = htonl((uint32_t)(num & 0xFFFFFFFF));
@@ -161,17 +166,13 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
   std::cout << "raw len = " << len << std::endl;
   if(ret==0) return NetResult::RECV_ERROR;
   if(ret!=sizeof(len)) return NetResult::RECV_ERROR;
-  
+
   uint32_t l=ntohl(len);
-
   // std::cout << "host len = " << l << std::endl;
-
   const uint32_t MAX_LEN=100*1024*1024;
-
   if(l>MAX_LEN) {
     return NetResult::RECV_ERROR;
   }
-
   msg.resize(l);
   if(l > 0) {
     ret=recv_all(sockfd_,&msg[0],l);
@@ -181,9 +182,7 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
       return NetResult::RECV_ERROR;
     }
   }
-
   std::cout << "[RECV fd=" << sockfd_ << "] " << "\"" << msg << "\"" << std::endl;
-
   // std::cout << "data: ";
   // for(unsigned char c : msg) printf("%02X ", c);
   // std::cout << std::endl;

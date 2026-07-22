@@ -38,6 +38,7 @@ class TcpSocket {
   TcpSocket(int sockfd);
   ~TcpSocket();
 
+  void closefd();
   NetResult sendMsg(std::string msg);
   NetResult recvMsg(std::string& msg);
 
