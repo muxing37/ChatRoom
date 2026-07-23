@@ -70,7 +70,9 @@ public:
   int addOfflineMsg(const Message& msg);
   int delOfflineMsg(const std::string& msg_id);
   std::vector<Message> getOfflineMsg(int uid);
+  std::vector<Message> getAllMsg(int uid);
   std::vector<Message> getHistory(int uid1,int uid2);
+  std::string getMsgId();
 
   bool save(const std::string& path);
   bool load(const std::string& path);
@@ -78,6 +80,7 @@ public:
 private:
   std::unordered_map<std::string,std::vector<Message>> history_;
   std::unordered_map<int,std::vector<Message>> offline_msg_;
+  std::atomic<uint64_t> count{0};
   std::mutex mtx_;
 };
 
@@ -93,7 +96,7 @@ public:
   void bindUser(int user_id,std::shared_ptr<TcpSocket> sock);
   void unbindUser(int user_id);
   std::shared_ptr<TcpSocket> getSock(int user_id);
-
+  
   bool isOnline(int uid);
   bool sendTo(int uid,const Message& msg);
 

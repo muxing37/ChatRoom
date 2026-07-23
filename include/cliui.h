@@ -9,7 +9,12 @@ enum class ClientState {
 
 class CliUI {
 public:
-  CliUI(AuthService& authService,FriendService& friendService,ClientContext& ctx);
+  CliUI(
+    AuthService& authService,
+    FriendService& friendService,
+    PrivateChatService& pcService,
+    ClientContext& ctx
+  );
   void run();
 
 private:
@@ -22,6 +27,8 @@ private:
   void deleteFriend();
   void showFriendRequest();
 
+  void privateChat();
+
   void show(ClientState state);
   int inputChoice(int min,int max);
   std::string inputString(const std::string& prompt);
@@ -29,6 +36,7 @@ private:
 private:
   AuthService& authService_;
   FriendService& friendService_;
+  PrivateChatService& pcService_;
   ClientContext& ctx_;
   bool running_=true;
 

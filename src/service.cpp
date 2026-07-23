@@ -121,7 +121,6 @@ int FriendService::del(int uid) {
   j["data"]["to_uid"] = uid;
   auto reply = network_.request(j);
 
-
   return reply["status"];
 }
 
@@ -331,15 +330,17 @@ int PrivateChatService::sendPrivateMessage(int to_uid,const std::string& text) {
   // std::string message_id;
   // message_id = getMsgId();
   j["type"] = "chat";
+  // j["request_id"] = 
   j["action"] = "private_chat";
   j["data"] = {
-    // {"message_id",message_id},
-    {"type",text},
+    {"message_id","0"},
+    {"type","text"},
     {"chat_type","private"},
     {"from_uid",ctx_.getSelf().uid},
-    {"to_uid",to_uid},
+    {"target_id",to_uid},
     {"content",text},
-    {"time",time(nullptr)}
+    {"time",time(nullptr)},
+    {"status",0}
   };
   auto reply = network_.request(j);
   if(reply["status"] != 0) {

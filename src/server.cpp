@@ -9,6 +9,7 @@ const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
 UsrManager usrManager;
 SessionManager sessionManager;
 FriendManager friendManager;
+MessageManager messageManager;
 UidGenerator get_uid;
 
 class TcpServer {
@@ -35,6 +36,7 @@ public:
 private:
   void authServer();
   void friendSever(nlohmann::json j);
+  void chatServer(nlohmann::json j);
   bool run_cmd(std::vector<std::string> token);
   std::vector<std::string> gettoken(std::string input);
   bool doPASV();
@@ -223,55 +225,46 @@ void Session::friendSever(nlohmann::json j) {
   }
 }
 
+void Session::chatServer(nlohmann::json j) {
+  if(j["action"] == "private_chat") {
+    j["data"]["message_id"] = messageManager.getMsgId();
+    auto msg = j["data"].get<Message>();
+    if(sessionManager.isOnline(msg.target_id)) {
+      sessionManager.sendTo(msg.target_id,msg);
+      msg.status = 1;
+      messageManager.add(msg);
+    } else {
+      messageManager.addOfflineMsg(msg);
+    }
+    nlohmann::json reply = makeReply(j,0);
+    reply["data"] = msg;
+    ctrlSock_->sendMsg(reply.dump());
+    //  = makeReply();
+    // messageManager.add();
+  }
+  if(j["action"] == "private_history") {
+    // messageManager.getHistory(j["data"]["from_uid"]);
+  }
+}
+
 void Session::start() {
-  // User* usr;
   std::string recv;
-
   authServer();
-
   while(true) {
     if(ctrlSock_->recvMsg(recv) != NetResult::OK) {
       std::cout << "[INFO] client disconnected or recv failed\n";
       break;
     }
-
     if(recv.empty()) continue;
     nlohmann::json j = nlohmann::json::parse(recv);
     if(j["type"] == "friend") {
       friendSever(j);
       continue;
     }
-
-    // std::vector<std::string> token;
-    // // token=gettoken(msg);
-
-    // if(token.size()==0) {
-    //   continue;
-    // } else if(token.size()==1 && (token[0] == "RETR" || token[0] == "STOR")) {
-    //   ctrlSock_->sendMsg("请输入文件名");
-    //   continue;
-    // } else {
-    //   // ctrlSock_->sendMsg("yes");
-    //   // continue;
-    // }
-
-    // if(token[0]=="PASV" || pasvReady_==true) {
-    //   if(pasvReady_==false) {
-    //     doPASV();
-    //     continue;
-    //   }
-    //   if(pasvReady_==true) {
-    //     if(run_cmd(token)) continue;
-    //   }
-    // }
-
-    // if(token[0]=="/exit" || token[0]=="QUIT") {
-    //   // signal(SIGCHLD,SIG_IGN);
-    //   // std::cout << "111\n";
-    //   ctrlSock_->~TcpSocket();
-    //   sessionManager.unbindUser(usr->uid);
-    //   break;
-    // }
+    if(j["type"] == "chat") {
+      chatServer(j);
+      continue;
+    }
   }
 }
 
@@ -386,7 +379,6 @@ bool Session::doPASV() {
   pasvReady_ = true;
   return true;
 }
-
 
 int start_server() {
   std::filesystem::create_directories(SAVEPATH);

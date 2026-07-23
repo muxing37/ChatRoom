@@ -19,7 +19,7 @@ class TcpClient {
 TcpClient::TcpClient() : socket_(nullptr) {}
 
 bool TcpClient::connectToHost(const char* ip,unsigned short port) {
-  int fd=socket(AF_INET,SOCK_STREAM,0);
+  int fd = socket(AF_INET,SOCK_STREAM,0);
 
   if(fd<0) {
     return false;
@@ -36,7 +36,7 @@ bool TcpClient::connectToHost(const char* ip,unsigned short port) {
     return false;
   }
 
-  socket_=std::make_shared<TcpSocket>(fd);
+  socket_ = std::make_shared<TcpSocket>(fd);
   return true;
 }
 
@@ -58,15 +58,17 @@ int start_client() {
   mkdir(workpath.c_str(),0755);
   chdir(workpath.c_str());
 
-  bool pasving=false;
-  TcpClient dataClient;
-  TcpSocket* pasv;
+  // bool pasving=false;
+  // TcpClient dataClient;
+  // TcpSocket* pasv;
 
   ClientContext ctx;
   ClientNetwork network(sock);
   AuthService authService(network,ctx);
   FriendService friendService(network,ctx);
-  CliUI menu(authService,friendService,ctx);
+  PrivateChatService pcService(network,ctx);
+  CliUI menu(authService,friendService,pcService,ctx);
+
   network.start();
 
   menu.run();

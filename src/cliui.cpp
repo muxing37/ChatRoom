@@ -1,8 +1,19 @@
 #include "cliui.h"
 
-CliUI::CliUI(AuthService& authService,FriendService& friendService,ClientContext& ctx) : authService_(authService),friendService_(friendService),ctx_(ctx) {}
+CliUI::CliUI(
+  AuthService& authService,
+  FriendService& friendService,
+  PrivateChatService& pcService,
+  ClientContext& ctx
+) : 
+  authService_(authService),
+  friendService_(friendService),
+  pcService_(pcService),
+  ctx_(ctx) {}
 
 void CliUI::run() {
+  show(ClientState::LOGIN);
+  loginMenu();
   while(running_) {
     mainMenu();
   }
@@ -32,8 +43,6 @@ void CliUI::loginMenu() {
 }
 
 void CliUI::mainMenu() {
-  show(ClientState::LOGIN);
-  loginMenu();
   show(ClientState::MAIN_MENU);
 
   switch(inputChoice(1,5)) {
@@ -42,6 +51,7 @@ void CliUI::mainMenu() {
       break;
 
     case 2:
+      privateChat();
       break;
 
     case 3:
@@ -89,10 +99,38 @@ void CliUI::showFriendList() {
     return;
   }
   auto friends=ctx_.getFriendList();
-  std::cout<<"\n好友列表:\n";
-
+  std::cout << "\n好友列表:\n";
+  int i=0;
   for(auto &u:friends) {
-    std::cout <<u.uid<<" " <<u.username <<'\n';
+    std::cout << ++i << "." << u.uid << " " << u.username << '\n';
+  }
+}
+
+void CliUI::privateChat() {
+  if(friendService_.listFriend() != 0) {
+    std::cout<<"获取好友列表失败\n";
+    return;
+  }
+  auto friends=ctx_.getFriendList();
+  std::cout << "\n好友列表:\n";
+  int i=0;
+  for(auto &u:friends) {
+    std::cout << ++i << "." << u.uid << " " << u.username << '\n';
+  }
+  std::cout << "请输入好友序号：" << std::endl;
+  int choice = inputChoice(1,friends.size());
+  auto frie = friends[choice];
+  // int uid = frie.uid;
+  // pcService_.syncHistory(frie.uid);
+  // auto msgs = ctx_.getMessage(frie.uid);
+  // for(auto msg : msgs) {
+  //   std::cout << frie.username << ":" << msg.time << msg.content << std::endl;
+  // }
+  std::string input;
+  while(input != "/exit") {
+    std::cin >> input;
+    if(input == "/exit") break;
+    pcService_.sendPrivateMessage(frie.uid,input);
   }
 }
 
@@ -121,13 +159,10 @@ void CliUI::showFriendRequest() {
     std::cout<<"获取好友申请失败\n";
     return;
   }
-
   auto list = ctx_.getFriendRequests();
-
   std::cout << "好友申请:" << std::endl;
-
   for(auto &u : list) {
-    std::cout << u.uid << " " <<u.username <<'\n';
+    std::cout << u.uid << " " << u.username <<'\n';
   }
 
   while(true) {

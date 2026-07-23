@@ -279,7 +279,18 @@ int MessageManager::addOfflineMsg(const Message& msg) {
 }
 
 int MessageManager::delOfflineMsg(const std::string& msg_id) {
+  std::lock_guard lock(mtx_);
+  for(auto& [uid,list] : offline_msg_) {
+    auto it = std::remove_if(list.begin(),list.end(),[&](const Message& msg) {
+        return msg.message_id == msg_id;
+      });
 
+    if(it != list.end()) {
+      list.erase(it,list.end());
+      return true;
+    }
+  }
+  return false;
 }
 
 std::vector<Message> MessageManager::getOfflineMsg(int uid) {
@@ -301,14 +312,42 @@ std::vector<Message> MessageManager::getHistory(int uid1,int uid2) {
   return it->second;
 }
 
+std::vector<Message> MessageManager::getAllMsg(int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::vector<Message> result;
+  for(const auto& [key,msgs] : history_) {
+    for(const auto& msg : msgs) {
+      if(msg.from_uid == uid || msg.target_id == uid) {
+        result.push_back(msg);
+      }
+    }
+  }
+  std::sort(result.begin(),result.end(),
+    [](const Message& a,const Message& b){
+      return a.time < b.time;
+    });
+
+  return result;
+}
+
+std::string MessageManager::getMsgId() {
+  uint64_t ms =
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+  uint64_t i = count++;
+  return std::to_string(ms) + "_" + std::to_string(i);
+}
+
 bool MessageManager::save(const std::string& path) {
   std::lock_guard lock(mtx_);
-
+  return true;
 }
 
 bool MessageManager::load(const std::string& path) {
   std::lock_guard lock(mtx_);
-
+  return true;
 }
 
 void SessionManager::unbindUser(int user_id) {

@@ -29,7 +29,7 @@ struct Message {
 
     int status;  // 0:待发送 1:已送达
 };
-void to_json(nlohmann::json& j,const Message& msg) {
+inline void to_json(nlohmann::json& j,const Message& msg) {
     j = {
         {"message_id",msg.message_id},
         {"type",msg.type},
@@ -41,7 +41,7 @@ void to_json(nlohmann::json& j,const Message& msg) {
         {"status",msg.status}
     };
 }
-void from_json(const nlohmann::json& j,Message& msg) {
+inline void from_json(const nlohmann::json& j,Message& msg) {
     j.at("message_id").get_to(msg.message_id);
     j.at("type").get_to(msg.type);
     j.at("chat_type").get_to(msg.chat_type);
