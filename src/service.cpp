@@ -325,12 +325,7 @@ PrivateChatService::PrivateChatService(ClientNetwork& network,ClientContext& ctx
 
 int PrivateChatService::sendPrivateMessage(int to_uid,const std::string& text) {
   nlohmann::json j;
-  // j["msg_type"] = "request";
-  // j["request_id"] = network_.;
-  // std::string message_id;
-  // message_id = getMsgId();
   j["type"] = "chat";
-  // j["request_id"] = 
   j["action"] = "private_chat";
   j["data"] = {
     {"message_id","0"},

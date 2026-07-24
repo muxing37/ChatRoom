@@ -7,12 +7,14 @@
 struct User {
     int uid;
     std::string username;
-    std::string password;
+    bool online;
+    // std::string password;
 };
 
 struct Account {
     int uid;
     std::string username;
+    std::string password;
     std::string password_hash;
 };
 

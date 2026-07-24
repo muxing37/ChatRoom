@@ -198,10 +198,12 @@ void Session::friendSever(nlohmann::json j) {
     auto list = friendManager.list_friend(self_uid);
     for(int uid : list) {
       User *u = usrManager.getUser(uid);
+      u->online = sessionManager.isOnline(u->uid);
       if(!u) continue;
       reply["data"]["friends"].push_back({
         {"uid",u->uid},
-        {"username",u->username}
+        {"username",u->username},
+        {"online",u->online}
       });
     }
     ctrlSock_->sendMsg(reply.dump());
@@ -239,8 +241,6 @@ void Session::chatServer(nlohmann::json j) {
     nlohmann::json reply = makeReply(j,0);
     reply["data"] = msg;
     ctrlSock_->sendMsg(reply.dump());
-    //  = makeReply();
-    // messageManager.add();
   }
   if(j["action"] == "private_history") {
     // messageManager.getHistory(j["data"]["from_uid"]);

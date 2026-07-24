@@ -39,7 +39,7 @@ public:
   User* getUser(int uid);
     
 private:
-  std::unordered_map<int,User> uid_map;
+  std::unordered_map<int,Account> uid_map;
   std::unordered_map<std::string,int> name_map;
   std::mutex mtx_;
 };

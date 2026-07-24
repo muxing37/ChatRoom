@@ -119,7 +119,7 @@ void CliUI::privateChat() {
   }
   std::cout << "请输入好友序号：" << std::endl;
   int choice = inputChoice(1,friends.size());
-  auto frie = friends[choice];
+  auto frie = friends[choice-1];
   // int uid = frie.uid;
   // pcService_.syncHistory(frie.uid);
   // auto msgs = ctx_.getMessage(frie.uid);

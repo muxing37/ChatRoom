@@ -19,13 +19,14 @@ bool UsrManager::regis(const std::string& username,const std::string& password,i
     return false;
   }
 
-  User user{
+  Account auth {
     uid,
     username,
+    password,
     password
   };
 
-  uid_map[uid] = user;
+  uid_map[uid] = auth;
   name_map[username] = uid;
 
   return true;
@@ -48,7 +49,6 @@ bool UsrManager::login(const std::string& username,const std::string& password,i
   if(uiter->second.password != password) {
     return false;
   }
-
   out_uid = uid;
   return true;
 }
@@ -65,14 +65,15 @@ bool UsrManager::load(const std::string& path) {
   name_map.clear();
 
   for(auto& item : j) {
-    User user;
+    Account auth;
 
-    user.uid = item["uid"];
-    user.username = item["username"];
-    user.password = item["password"];
+    auth.uid = item["uid"];
+    auth.username = item["username"];
+    auth.password = item["password"];
+    // auth.password_hash = item["password_hash"];
 
-    uid_map[user.uid] = user;
-    name_map[user.username] = user.uid;
+    uid_map[auth.uid] = auth;
+    name_map[auth.username] = auth.uid;
   }
 
   return true;
@@ -81,11 +82,12 @@ bool UsrManager::load(const std::string& path) {
 bool UsrManager::save(const std::string& path) {
   nlohmann::json j = nlohmann::json::array();
 
-  for(auto& [uid, user] : uid_map) {
+  for(auto& [uid, auth] : uid_map) {
     j.push_back({
-      {"uid",user.uid},
-      {"username",user.username},
-      {"password",user.password}
+      {"uid",auth.uid},
+      {"username",auth.username},
+      {"password",auth.password},
+      {"password_hash",auth.password}
     });
   }
 
@@ -101,7 +103,7 @@ bool UsrManager::save(const std::string& path) {
 int UsrManager::getMaxUid() {
   int max_uid = 10000;
 
-  for(auto& [uid, user] : uid_map) {
+  for(auto& [uid, auth] : uid_map) {
     if(uid > max_uid) max_uid = uid;
   }
 
@@ -123,8 +125,11 @@ User* UsrManager::getUser(int uid) {
   if(iter == uid_map.end()) {
     return nullptr;
   }
-
-  return &iter->second;
+  User *usr = new User;
+  usr->uid = iter->second.uid;
+  usr->username = iter->second.username;
+  usr->online = false;
+  return usr;
 }
 
 std::vector<int> FriendManager::list_friend(int uid) {

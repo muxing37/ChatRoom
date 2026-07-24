@@ -4,6 +4,7 @@ project(ChatProject)
 set(CMAKE_CXX_STANDARD 17)
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/include/third)
 
 # server
 add_executable(server
@@ -19,6 +20,7 @@ add_executable(client
     src/client.cpp
     src/socket.cpp
     src/service.cpp
+    src/webui.cpp
     src/cliui.cpp
 )
 

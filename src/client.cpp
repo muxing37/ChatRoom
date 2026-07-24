@@ -1,6 +1,8 @@
 #include "client.h"
 #include "service.h"
+#include "webui.h"
 #include "cliui.h"
+// #include "cliui.h"
 
 #define MAX_PATH 1024
 
@@ -41,7 +43,6 @@ bool TcpClient::connectToHost(const char* ip,unsigned short port) {
 }
 
 int start_client() {
-
   TcpClient client;
   if(!client.connectToHost("127.0.0.1", 2100)) {
     std::cerr << "[FAIL] connectToHost failed\n";
@@ -56,7 +57,7 @@ int start_client() {
   }
   std::string workpath=std::string(getenv("HOME")) + "/Download";
   mkdir(workpath.c_str(),0755);
-  chdir(workpath.c_str());
+  // chdir(workpath.c_str());
 
   // bool pasving=false;
   // TcpClient dataClient;
