@@ -57,28 +57,6 @@ NetResult TcpSocket::sendMsg(std::string msg) {
   return NetResult::OK;
 }
 
-NetResult  TcpSocket::sendMsgpack(Msgpack& msg) {
-  uint32_t type = static_cast<uint32_t>(msg.type);
-  uint32_t netType = htonl(type);
-  if(send_all(sockfd_,&netType,sizeof(netType)) != sizeof(netType)) {
-    return NetResult::SEND_ERROR;
-  }
-
-  uint32_t len = msg.msg.size();
-  uint32_t netLen = htonl(len);
-  if(send_all(sockfd_,&netLen,sizeof(netLen)) != sizeof(netLen)) {
-    return NetResult::SEND_ERROR;
-  }
-
-  if(len > 0) {
-    if(send_all(sockfd_,msg.msg.data(),len) != (int)len) {
-      return NetResult::SEND_ERROR;
-    }
-  }
-
-  return NetResult::OK;
-}
-
 NetResult TcpSocket::sendFile(std::string& path,uint64_t offset) {
   int fd = open(path.c_str(),O_RDONLY);
   if(fd < 0) {
@@ -186,29 +164,6 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
   // std::cout << "data: ";
   // for(unsigned char c : msg) printf("%02X ", c);
   // std::cout << std::endl;
-
-  return NetResult::OK;
-}
-
-NetResult TcpSocket::recvMsgpack(Msgpack& msg) {
-  uint32_t netType=0;
-  int ret = recv_all(sockfd_,&netType,sizeof(netType));
-  if(ret != sizeof(netType)) return NetResult::RECV_ERROR;
-  msg.type=static_cast<MsgType>(ntohl(netType));
-
-  uint32_t netLen = 0;
-  ret = recv_all(sockfd_,&netLen,sizeof(netLen));
-  if(ret != sizeof(netLen)) return NetResult::RECV_ERROR;
-  uint32_t len = ntohl(netLen);
-
-  const uint32_t MAX_LEN = 100*1024*1024;
-  if(len > MAX_LEN) return NetResult::RECV_ERROR;
-
-  msg.msg.resize(len);
-  if(len > 0) {
-    ret = recv_all(sockfd_,&msg.msg[0],len);
-    if(ret != (int)len) return NetResult::RECV_ERROR;
-  }
 
   return NetResult::OK;
 }
