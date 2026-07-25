@@ -3,6 +3,7 @@
 const std::string SAVEPATH = "./data";
 const std::string USRDATA = SAVEPATH + "/usrdata.json";
 const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
+const std::string PCHATDATA = SAVEPATH + "/pchatdata";
 
 std::string privateId(int uid1, int uid2) {
   if(uid1 > uid2) std::swap(uid1, uid2);
@@ -274,12 +275,14 @@ int MessageManager::add(const Message& msg) {
   std::lock_guard lock(mtx_);
   std::string cvs_id = privateId(msg.from_uid,msg.target_id);
   history_[cvs_id].push_back(msg);
+  save(PCHATDATA);
   return 0;
 }
 
 int MessageManager::addOfflineMsg(const Message& msg) {
   std::lock_guard lock(mtx_);
   offline_msg_[msg.target_id].push_back(msg);
+  save(PCHATDATA);
   return true;
 }
 
@@ -295,6 +298,7 @@ int MessageManager::delOfflineMsg(const std::string& msg_id) {
       return true;
     }
   }
+  save(PCHATDATA);
   return false;
 }
 
@@ -346,12 +350,54 @@ std::string MessageManager::getMsgId() {
 }
 
 bool MessageManager::save(const std::string& path) {
-  std::lock_guard lock(mtx_);
+  // std::lock_guard<std::mutex> lock(mtx_);
+  nlohmann::json j;
+  // 保存聊天记录
+  for(const auto& [key, msgs] : history_) {
+    j["history"][key] = msgs;
+  }
+  // 保存离线消息
+  for(const auto& [uid, msgs] : offline_msg_) {
+    j["offline"][std::to_string(uid)] = msgs;
+  }
+  // 保存计数器
+  j["count"] = count.load();
+  std::ofstream ofs(path);
+  if(!ofs.is_open()) {
+    return false;
+  }
+  ofs << std::setw(4) << j;
   return true;
 }
 
 bool MessageManager::load(const std::string& path) {
-  std::lock_guard lock(mtx_);
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::ifstream ifs(path);
+  if (!ifs.is_open()) {
+    return false;
+  }
+  nlohmann::json j;
+  ifs >> j;
+  history_.clear();
+  offline_msg_.clear();
+  // 恢复聊天记录
+  if(j.contains("history")) {
+    for (auto& [key, value] : j["history"].items()) {
+      history_[key] = value.get<std::vector<Message>>();
+    }
+  }
+  // 恢复离线消息
+  if(j.contains("offline")) {
+    for (auto& [uid, value] : j["offline"].items()) {
+      offline_msg_[std::stoi(uid)] = value.get<std::vector<Message>>();
+    }
+  }
+  // 恢复计数器
+  if(j.contains("count")) {
+    count.store(j["count"].get<uint64_t>());
+  } else {
+    count.store(0);
+  }
   return true;
 }
 

@@ -13,7 +13,7 @@ MessageManager messageManager;
 UidGenerator get_uid;
 
 class TcpServer {
-  public:
+public:
   TcpServer();
   ~TcpServer();
 
@@ -21,7 +21,7 @@ class TcpServer {
   bool setListen(unsigned short port);
   std::shared_ptr<TcpSocket> acceptConn();
 
-  private:
+private:
   int listenfd_;
 };
 
@@ -37,14 +37,9 @@ private:
   void authServer();
   void friendSever(nlohmann::json j);
   void chatServer(nlohmann::json j);
-  bool run_cmd(std::vector<std::string> token);
-  std::vector<std::string> gettoken(std::string input);
-  bool doPASV();
 
 private:
   std::shared_ptr<TcpSocket> ctrlSock_;
-  std::shared_ptr<TcpSocket> pasv;
-  TcpServer dataServer;
   std::filesystem::path cwd_;
   std::filesystem::path oldCwd_;
   bool pasvReady_;
@@ -137,6 +132,7 @@ void Session::authServer() {
         continue;
       }
       usr = usrManager.getUser(uid);
+      usr->online = true;
       usrManager.save(USRDATA);
       reply["status"]=0;
       reply["data"]={
@@ -154,6 +150,7 @@ void Session::authServer() {
         continue;
       }
       usr = usrManager.getUser(uid);
+      usr->online = true;
       reply["status"]=0;
       reply["data"]={
         {"uid",uid},
@@ -242,8 +239,14 @@ void Session::chatServer(nlohmann::json j) {
     reply["data"] = msg;
     ctrlSock_->sendMsg(reply.dump());
   }
-  if(j["action"] == "private_history") {
-    // messageManager.getHistory(j["data"]["from_uid"]);
+  if(j["action"] == "private_history_all") {
+    std::vector<Message> result;
+    result = messageManager.getAllMsg(j["data"]["from_uid"]);
+    nlohmann::json reply = makeReply(j,0);
+    for(auto& msg : result) {
+      reply["data"].push_back(msg);
+    }
+    ctrlSock_->sendMsg(reply.dump());
   }
 }
 
@@ -266,118 +269,6 @@ void Session::start() {
       continue;
     }
   }
-}
-
-bool Session::run_cmd(std::vector<std::string> token) {
-  bool used = false;
-  std::string now_path=cwd_.string();
-  int status;
-  if(token[0]=="STOR") {
-    pasv->sendMsg("start_stor");
-    std::string path=now_path;
-    if(token[1].size()>=2 && token[1].substr(0,2) == "./") {
-      token[1].erase(0,2);
-      path += "/" + token[1];
-    } else if (token[1].size()>=1 && token[1].substr(0,1) == "/") {
-      path.clear();
-      path = token[1];
-    } else {
-      path += "/" + token[1];
-    }
-    uint64_t offset = 0;
-    struct stat st;
-    if(stat(path.c_str(), &st) == 0) {
-      offset = st.st_size;
-    }
-
-    pasv->sendMsg(token[1] + "|" + std::to_string(offset));
-
-    pasv->recvFile(path,offset);
-    used = true;
-  }
-
-  if(token[0]=="RETR") {
-    pasv->sendMsg("start_retr");
-    std::string path=now_path;
-    if(token[1].size()>=2 && token[1].substr(0,2) == "./") {
-      token[1].erase(0,2);
-      path += "/" + token[1];
-    } else if (token[1].size()>=1 && token[1].substr(0,1) == "/") {
-      path.clear();
-      path = token[1];
-    } else {
-      path += "/" + token[1];
-    }
-    struct stat st;
-    if(stat(path.c_str(), &st) != 0) {
-      pasv->sendMsg("error:file_not_found");
-      return false;
-    } else {
-      pasv->sendMsg("ok");
-    }
-    pasv->sendMsg(path);
-    uint64_t filesize = st.st_size;
-    std::string offsetMsg;
-    pasv->recvMsg(offsetMsg);
-
-    uint64_t offset = std::stoull(offsetMsg);
-
-    if(offset > filesize) {
-      offset = 0;
-    }
-
-    pasv->sendFile(path,offset);
-    used = true;
-  }
-  if(used) pasvReady_=false;
-  else pasv->sendMsg("not used");
-  return used;
-}
-
-std::vector<std::string> Session::gettoken(std::string input) {
-  std::vector<std::string> token;
-  std::string current;
-
-  for(char c : input) {
-    if(c == ' ') {
-      if(!current.empty()) {
-        token.push_back(current);
-        current.clear();
-      }
-    } else {
-      current += c;
-    }
-  }
-  if(!current.empty()) {
-    token.push_back(current);
-  }
-  return token;
-}
-
-bool Session::doPASV() {
-  sockaddr_in addr;
-  if(!dataServer.setListen(0)) {
-    std::cerr << "data listen failed\n";
-  }
-
-  std::cout << "[INFO] data listening...\n";
-  unsigned short dataPort = dataServer.getPort();
-  if(dataPort != 0) {
-    int p1 = dataPort/256;
-    int p2 = dataPort%256;
-    std::string reply = "227 entering passive mode (127,0,0,1," 
-      + std::to_string(p1) + "," + std::to_string(p2) + ")";
-
-    ctrlSock_->sendMsg(reply);
-  }
-
-  pasv = dataServer.acceptConn();
-
-  std::cout << "[PASS] client connected\n";
-  std::cout << "[DATA] waiting data connection...\n";
-
-  pasvReady_ = true;
-  return true;
 }
 
 int start_server() {

@@ -358,7 +358,7 @@ int PrivateChatService::sendPrivateMessage(int to_uid,const std::string& text) {
 int PrivateChatService::syncHistory(int uid) {
   nlohmann::json j;
   j["type"] = "chat";
-  j["action"] = "private_history";
+  j["action"] = "private_history_all";
   j["data"] = {
     {"from_uid",uid}
   };
@@ -380,7 +380,3 @@ void PrivateChatService::gotPush(const nlohmann::json& push) {
   auto msg = push["data"].get<Message>();
   ctx_.addMessage(msg);
 }
-
-// std::string PrivateChatService::getMsgId() {
-
-// }

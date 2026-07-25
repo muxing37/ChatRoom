@@ -2,7 +2,6 @@
 #include "service.h"
 #include "webui.h"
 #include "cliui.h"
-// #include "cliui.h"
 
 #define MAX_PATH 1024
 
