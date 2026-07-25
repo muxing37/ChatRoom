@@ -22,19 +22,8 @@ enum class NetResult {
   FILE_ERROR
 };
 
-enum class MsgType {
-  CMD,
-  PATH_INFO,
-  INFO
-};
-
-struct Msgpack {
-  MsgType type;
-  std::string msg;
-};
-
 class TcpSocket {
-  public:
+public:
   TcpSocket(int sockfd);
   ~TcpSocket();
 
@@ -42,14 +31,9 @@ class TcpSocket {
   NetResult sendMsg(std::string msg);
   NetResult recvMsg(std::string& msg);
 
-  NetResult sendMsgpack(Msgpack& msg);
-  NetResult recvMsgpack(Msgpack& msg);
-
   NetResult sendFile(std::string& path,uint64_t offset);
   NetResult recvFile(std::string& path,uint64_t offset);
 
-  // int getfd();
-
-  private:
+private:
   int sockfd_;
 };
