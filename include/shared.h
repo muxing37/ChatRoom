@@ -16,6 +16,7 @@ struct Account {
     std::string username;
     std::string password;
     std::string password_hash;
+    std::string salt;
 };
 
 struct Message {
@@ -29,7 +30,7 @@ struct Message {
     std::string content;
     uint64_t time;
 
-    int status;  // 0:待发送 1:已送达
+    int status;  // 0:待发送(接收方离线) 1:已送达
 };
 inline void to_json(nlohmann::json& j,const Message& msg) {
     j = {

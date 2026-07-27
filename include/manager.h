@@ -28,9 +28,11 @@ private:
 
 class UsrManager {
 public:
+  bool verify(const std::string& username,const std::string& password); //验证密码
   bool regis(const std::string& username,const std::string& password,int uid);
   bool login(const std::string& username,const std::string& password,int& out_uid);
-  
+  bool delUsr(int uid);
+
   bool load(const std::string& path);
   bool save(const std::string& path);
 
@@ -55,6 +57,8 @@ public:
 
   bool isFriend(int uid1,int uid2);
 
+  bool removeUsr(int uid); // 注销
+
   bool load(const std::string& path);
   bool save(const std::string& path);
 
@@ -67,19 +71,21 @@ private:
 class MessageManager {
 public:
   int add(const Message& msg);
-  int addOfflineMsg(const Message& msg);
-  int delOfflineMsg(const std::string& msg_id);
-  std::vector<Message> getOfflineMsg(int uid);
+  // int addOfflineMsg(const Message& msg);
+  // int delOfflineMsg(const std::string& msg_id);
+  // std::vector<Message> getOfflineMsg(int uid);
   std::vector<Message> getAllMsg(int uid);
   std::vector<Message> getHistory(int uid1,int uid2);
   std::string getMsgId();
+
+  bool removeUsr(int uid);
 
   bool save(const std::string& path);
   bool load(const std::string& path);
 
 private:
   std::unordered_map<std::string,std::vector<Message>> history_;
-  std::unordered_map<int,std::vector<Message>> offline_msg_;
+  // std::unordered_map<int,std::vector<Message>> offline_msg_;
   std::atomic<uint64_t> count{0};
   std::mutex mtx_;
 };

@@ -90,6 +90,8 @@ public:
   AuthService(ClientNetwork& network,ClientContext& ctx);
   bool login(const std::string& username,const std::string& password);
   bool regis(const std::string& username,const std::string& password);
+  bool logout(); //登出
+  bool delauth(); //注销账户
 
 private:
   ClientNetwork& network_;
@@ -99,12 +101,12 @@ private:
 class FriendService {
 public:
   FriendService(ClientNetwork& network,ClientContext& ctx);
-  int request(int uid);
-  int del(int uid);
-  int listFriend();
-  int listRequest();
-  int agree(int uid);
-  int reject(int uid);
+  int request(int uid); //好友申请
+  int del(int uid); //删除好友
+  int listFriend(); //获取好友列表
+  int listRequest(); //获取好友申请列表
+  int agree(int uid); //同意好友申请
+  int reject(int uid); //拒绝好友申请
 
 private:
   ClientNetwork& network_;
@@ -114,9 +116,9 @@ private:
 class PrivateChatService {
 public:
   PrivateChatService(ClientNetwork& network,ClientContext& ctx);
-  int sendPrivateMessage(int to_uid,const std::string& text);
-  int syncHistory(int uid);
-  std::vector<Message> getMessages(int uid);
+  int sendPrivateMessage(int to_uid,const std::string& text); //发送私聊消息
+  int syncHistory(int uid); //从服务端同步聊天记录
+  std::vector<Message> getMessages(int uid); //从本地ctx获取聊天记录
   void gotPush(const nlohmann::json& push);
 
 private:

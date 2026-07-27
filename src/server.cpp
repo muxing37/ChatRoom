@@ -28,21 +28,19 @@ private:
 class Session {
 public:
 
-  Session(std::shared_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {
-    pasvReady_ = false;
-  }
+  Session(std::shared_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {}
+
   void start();
 
 private:
   void authServer();
   void friendSever(nlohmann::json j);
   void chatServer(nlohmann::json j);
+  void groupServer(nlohmann::json j);
 
 private:
   std::shared_ptr<TcpSocket> ctrlSock_;
-  std::filesystem::path cwd_;
-  std::filesystem::path oldCwd_;
-  bool pasvReady_;
+
 };
 
 TcpServer::TcpServer()
@@ -233,7 +231,9 @@ void Session::chatServer(nlohmann::json j) {
       msg.status = 1;
       messageManager.add(msg);
     } else {
-      messageManager.addOfflineMsg(msg);
+      // messageManager.addOfflineMsg(msg);
+      msg.status = 0;
+      messageManager.add(msg);
     }
     nlohmann::json reply = makeReply(j,0);
     reply["data"] = msg;
@@ -253,6 +253,11 @@ void Session::chatServer(nlohmann::json j) {
 void Session::start() {
   std::string recv;
   authServer();
+// std::vector<Message> offMsg;
+// offMsg = messageManager.getOfflineMsg(usr->uid);
+// for(auto& msg : offMsg) {
+//   sessionManager.sendTo(usr->uid,msg);
+// }
   while(true) {
     if(ctrlSock_->recvMsg(recv) != NetResult::OK) {
       std::cout << "[INFO] client disconnected or recv failed\n";

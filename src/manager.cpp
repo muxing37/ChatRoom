@@ -3,7 +3,7 @@
 const std::string SAVEPATH = "./data";
 const std::string USRDATA = SAVEPATH + "/usrdata.json";
 const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
-const std::string PCHATDATA = SAVEPATH + "/pchatdata";
+const std::string PCHATDATA = SAVEPATH + "/pchatdata.json";
 
 std::string privateId(int uid1, int uid2) {
   if(uid1 > uid2) std::swap(uid1, uid2);
@@ -11,6 +11,10 @@ std::string privateId(int uid1, int uid2) {
 }
 std::string groupId(int groupId) {
   return "group_" + std::to_string(groupId);
+}
+
+bool UsrManager::verify(const std::string& username,const std::string& password) {
+
 }
 
 bool UsrManager::regis(const std::string& username,const std::string& password,int uid) {
@@ -52,6 +56,11 @@ bool UsrManager::login(const std::string& username,const std::string& password,i
   }
   out_uid = uid;
   return true;
+}
+
+bool UsrManager::delUsr(int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  
 }
 
 bool UsrManager::load(const std::string& path) {
@@ -217,6 +226,10 @@ bool FriendManager::isFriend(int uid1,int uid2) {
   return it->second.count(uid2) > 0;
 }
 
+bool FriendManager::removeUsr(int uid) {
+
+}
+
 bool FriendManager::load(const std::string& path) {
   std::ifstream ifs(path);
 
@@ -279,37 +292,37 @@ int MessageManager::add(const Message& msg) {
   return 0;
 }
 
-int MessageManager::addOfflineMsg(const Message& msg) {
-  std::lock_guard lock(mtx_);
-  offline_msg_[msg.target_id].push_back(msg);
-  save(PCHATDATA);
-  return true;
-}
+// int MessageManager::addOfflineMsg(const Message& msg) {
+//   std::lock_guard lock(mtx_);
+//   offline_msg_[msg.target_id].push_back(msg);
+//   save(PCHATDATA);
+//   return true;
+// }
 
-int MessageManager::delOfflineMsg(const std::string& msg_id) {
-  std::lock_guard lock(mtx_);
-  for(auto& [uid,list] : offline_msg_) {
-    auto it = std::remove_if(list.begin(),list.end(),[&](const Message& msg) {
-        return msg.message_id == msg_id;
-      });
+// int MessageManager::delOfflineMsg(const std::string& msg_id) {
+//   std::lock_guard lock(mtx_);
+//   for(auto& [uid,list] : offline_msg_) {
+//     auto it = std::remove_if(list.begin(),list.end(),[&](const Message& msg) {
+//         return msg.message_id == msg_id;
+//       });
 
-    if(it != list.end()) {
-      list.erase(it,list.end());
-      return true;
-    }
-  }
-  save(PCHATDATA);
-  return false;
-}
+//     if(it != list.end()) {
+//       list.erase(it,list.end());
+//       return true;
+//     }
+//   }
+//   save(PCHATDATA);
+//   return false;
+// }
 
-std::vector<Message> MessageManager::getOfflineMsg(int uid) {
-  std::lock_guard lock(mtx_);
-  auto it = offline_msg_.find(uid);
-  if(it == offline_msg_.end()) {
-    return {};
-  }
-  return it->second;
-}
+// std::vector<Message> MessageManager::getOfflineMsg(int uid) {
+//   std::lock_guard lock(mtx_);
+//   auto it = offline_msg_.find(uid);
+//   if(it == offline_msg_.end()) {
+//     return {};
+//   }
+//   return it->second;
+// }
 
 std::vector<Message> MessageManager::getHistory(int uid1,int uid2) {
   std::lock_guard lock(mtx_);
@@ -349,6 +362,10 @@ std::string MessageManager::getMsgId() {
   return std::to_string(ms) + "_" + std::to_string(i);
 }
 
+bool MessageManager::removeUsr(int uid) {
+
+}
+
 bool MessageManager::save(const std::string& path) {
   // std::lock_guard<std::mutex> lock(mtx_);
   nlohmann::json j;
@@ -356,10 +373,10 @@ bool MessageManager::save(const std::string& path) {
   for(const auto& [key, msgs] : history_) {
     j["history"][key] = msgs;
   }
-  // 保存离线消息
-  for(const auto& [uid, msgs] : offline_msg_) {
-    j["offline"][std::to_string(uid)] = msgs;
-  }
+  // // 保存离线消息
+  // for(const auto& [uid, msgs] : offline_msg_) {
+  //   j["offline"][std::to_string(uid)] = msgs;
+  // }
   // 保存计数器
   j["count"] = count.load();
   std::ofstream ofs(path);
@@ -379,7 +396,7 @@ bool MessageManager::load(const std::string& path) {
   nlohmann::json j;
   ifs >> j;
   history_.clear();
-  offline_msg_.clear();
+  // offline_msg_.clear();
   // 恢复聊天记录
   if(j.contains("history")) {
     for (auto& [key, value] : j["history"].items()) {
@@ -387,11 +404,11 @@ bool MessageManager::load(const std::string& path) {
     }
   }
   // 恢复离线消息
-  if(j.contains("offline")) {
-    for (auto& [uid, value] : j["offline"].items()) {
-      offline_msg_[std::stoi(uid)] = value.get<std::vector<Message>>();
-    }
-  }
+  // if(j.contains("offline")) {
+  //   for (auto& [uid, value] : j["offline"].items()) {
+  //     offline_msg_[std::stoi(uid)] = value.get<std::vector<Message>>();
+  //   }
+  // }
   // 恢复计数器
   if(j.contains("count")) {
     count.store(j["count"].get<uint64_t>());

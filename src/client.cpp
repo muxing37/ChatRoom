@@ -6,14 +6,12 @@
 #define MAX_PATH 1024
 
 class TcpClient {
-  public:
+public:
   TcpClient();
-
   std::shared_ptr<TcpSocket> getSocket() const { return socket_; }
-
   bool connectToHost(const char* ip, unsigned short port);
 
-  private:
+private:
   std::shared_ptr<TcpSocket> socket_;
 };
 
@@ -49,18 +47,12 @@ int start_client() {
   }
   std::cout << "[PASS] connected to server\n";
   auto sock = client.getSocket();
-  // auto sock = std::make_shared<TcpSocket>(fd);
   if(!sock) {
     std::cerr << "[FAIL] socket null\n";
     return 1;
   }
   std::string workpath=std::string(getenv("HOME")) + "/Download";
   mkdir(workpath.c_str(),0755);
-  // chdir(workpath.c_str());
-
-  // bool pasving=false;
-  // TcpClient dataClient;
-  // TcpSocket* pasv;
 
   ClientContext ctx;
   ClientNetwork network(sock);
@@ -72,6 +64,5 @@ int start_client() {
   network.start();
 
   menu.run();
-  
   return 0;
 }
