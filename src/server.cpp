@@ -21,8 +21,6 @@ public:
   bool setListen(unsigned short port);
   std::shared_ptr<TcpSocket> acceptConn();
 
-
-  
 private:
   int listenfd_;
 };
@@ -165,18 +163,18 @@ void Session::authServer() {
       ctrlSock_->sendMsg(reply.dump());
     }
   }
-  sessionManager.bindUser(usr->uid,ctrlSock_);
+  linked_usr_.username = usr->username;
+  linked_usr_.uid = usr->uid;
 }
 
 void Session::friendSever(nlohmann::json j) {
   int self_uid = j["data"]["from_uid"];
-  // nlohmann::json reply;
-  auto reply=makeReply(j,0);
+  nlohmann::json reply = makeReply(j,0);
   reply["type"] = "reply";
   reply["action"] = j["action"];
   if(j["action"] == "request") {
     int to_uid = j["data"]["to_uid"];
-    reply["status"] = friendManager.request(to_uid,self_uid);
+    reply["status"] = friendManager.request(self_uid,to_uid);
     ctrlSock_->sendMsg(reply.dump());
     if(sessionManager.isOnline(to_uid)) {
       nlohmann::json push;
@@ -258,6 +256,19 @@ void Session::friendSever(nlohmann::json j) {
       });
     }
     ctrlSock_->sendMsg(reply.dump());
+  } else if (j["action"] == "block") {
+    int to_uid = j["data"]["to_uid"];
+    reply["status"] = friendManager.block(self_uid,to_uid);
+    ctrlSock_->sendMsg(reply.dump());
+  } else if (j["action"] == "unblock") {
+    int to_uid = j["data"]["to_uid"];
+    reply["status"] = friendManager.unblock(self_uid,to_uid);
+    ctrlSock_->sendMsg(reply.dump());
+  } else if (j["action"] == "list_block") {
+    auto list = friendManager.getBlockList(self_uid);
+    reply["status"] = 0;
+    reply["data"]["block_list"] = list;
+    ctrlSock_->sendMsg(reply.dump());
   } else {
     reply["status"] = -1;
     reply["data"]["message"] = "unknown action";
@@ -268,15 +279,20 @@ void Session::friendSever(nlohmann::json j) {
 
 void Session::chatServer(nlohmann::json j) {
   if(j["action"] == "private_chat") {
-    j["data"]["message_id"] = messageManager.getMsgId();
     auto msg = j["data"].get<Message>();
+    if (friendManager.isBlocked(msg.target_id,msg.from_uid)) {
+      nlohmann::json reply = makeReply(j, -1);
+      reply["error"] = "blocked by receiver";
+      ctrlSock_->sendMsg(reply.dump());
+      return;
+    }
+    j["data"]["message_id"] = messageManager.getMsgId();
     msg.time = now_ms();
     if(sessionManager.isOnline(msg.target_id)) {
       sessionManager.sendChatTo(msg.target_id,msg);
       msg.status = 1;
       messageManager.add(msg);
     } else {
-      // messageManager.addOfflineMsg(msg);
       msg.status = 0;
       messageManager.add(msg);
     }
@@ -304,22 +320,48 @@ void Session::chatServer(nlohmann::json j) {
 }
 
 void Session::friendOnPush() {
-  // std::vector<int> fri = friendManager.list_friend(sessionManager.getSelf().uid);
-  // for(int& id : fri) {
-  //   if(sessionManager) {
+  std::vector<int> fri = friendManager.list_friend(linked_usr_.uid);
+  for(int& id : fri) {
+    if(sessionManager.isOnline(id)) {
+      nlohmann::json push;
+      // User* usr = usrManager.getUser(id);
+      push["msg_type"] = "push";
+      push["type"] = "friend";
+      push["action"] = "online";
+      push["time"] = now_ms();
+      push["data"] = {
+        {"username",linked_usr_.username},
+        {"uid",linked_usr_.uid}
+      };
+      sessionManager.sendPushTo(id,push);
+    }
+  }
+}
 
-  //   }
-  // }
+void Session::friendOffPush() {
+  std::vector<int> fri = friendManager.list_friend(linked_usr_.uid);
+  for(int& id : fri) {
+    if(sessionManager.isOnline(id)) {
+      nlohmann::json push;
+      // User* usr = usrManager.getUser(id);
+      push["msg_type"] = "push";
+      push["type"] = "friend";
+      push["action"] = "offline";
+      push["time"] = now_ms();
+      push["data"] = {
+        {"username",linked_usr_.username},
+        {"uid",linked_usr_.uid}
+      };
+      sessionManager.sendPushTo(id,push);
+    }
+  }
 }
 
 void Session::start() {
   std::string recv;
   authServer();
-// std::vector<Message> offMsg;
-// offMsg = messageManager.getOfflineMsg(usr->uid);
-// for(auto& msg : offMsg) {
-//   sessionManager.sendTo(usr->uid,msg);
-// }
+  sessionManager.bindUser(linked_usr_.uid,ctrlSock_);
+  friendOnPush();
   while(true) {
     if(ctrlSock_->recvMsg(recv) != NetResult::OK) {
       std::cout << "[INFO] client disconnected or recv failed\n";
@@ -336,6 +378,8 @@ void Session::start() {
       continue;
     }
   }
+  friendOffPush();
+  sessionManager.unbindUser(linked_usr_.uid);
 }
 
 int start_server() {

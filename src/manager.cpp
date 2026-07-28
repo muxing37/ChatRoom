@@ -146,8 +146,8 @@ std::vector<int> FriendManager::list_friend(int uid) {
 
   std::vector<int> res;
 
-  auto it = friends.find(uid);
-  if(it == friends.end()) return res;
+  auto it = friends_.find(uid);
+  if(it == friends_.end()) return res;
 
   for(int f : it->second) res.push_back(f);
 
@@ -159,8 +159,8 @@ std::vector<int> FriendManager::list_request(int uid) {
 
   std::vector<int> res;
 
-  auto it = requests.find(uid);
-  if(it == requests.end()) return res;
+  auto it = requests_.find(uid);
+  if(it == requests_.end()) return res;
 
   for(int f : it->second) {
     std::cout << f << std::endl;
@@ -172,36 +172,35 @@ std::vector<int> FriendManager::list_request(int uid) {
 int FriendManager::del(int uid1,int uid2) {
   std::lock_guard<std::mutex> lock(mtx_);
 
-  auto it1 = friends.find(uid1);
-  if(it1 != friends.end()) it1->second.erase(uid2);
+  auto it1 = friends_.find(uid1);
+  if(it1 != friends_.end()) it1->second.erase(uid2);
 
-  auto it2 = friends.find(uid2);
-  if(it2 != friends.end()) it2->second.erase(uid1);
+  auto it2 = friends_.find(uid2);
+  if(it2 != friends_.end()) it2->second.erase(uid1);
 
   save(FRIENDDATA);
   return 0;
 }
 
-int FriendManager::request(int uid1,int uid2) {
-  if(uid1 == uid2) return 1; //不可添加自己为好友
+int FriendManager::request(int from_uid,int to_uid) {
+  if(from_uid == to_uid) return 1; //不可添加自己为好友
   std::lock_guard<std::mutex> lock(mtx_);
-  if(FriendManager::isFriend(uid1,uid2)) return 2; //已经是好友
-  if(requests[uid1].count(uid2)) {
+  if(FriendManager::isFriend(from_uid,to_uid)) return 2; //已经是好友
+  if(requests_[to_uid].count(from_uid)) {
     return 3; //已发送过申请
   }
-  requests[uid1].insert(uid2);
+  requests_[to_uid].insert(from_uid);
   save(FRIENDDATA);
-
   return 0;
 }
 
 int FriendManager::agree(int uid1,int uid2) {
   std::lock_guard<std::mutex> lock(mtx_);
 
-  friends[uid1].insert(uid2);
-  friends[uid2].insert(uid1);
-  if(requests[uid1].count(uid2)) requests[uid1].erase(uid2);
-  if(requests[uid2].count(uid1)) requests[uid2].erase(uid1);
+  friends_[uid1].insert(uid2);
+  friends_[uid2].insert(uid1);
+  if(requests_[uid1].count(uid2)) requests_[uid1].erase(uid2);
+  if(requests_[uid2].count(uid1)) requests_[uid2].erase(uid1);
   
   save(FRIENDDATA);
   return true;
@@ -210,16 +209,16 @@ int FriendManager::agree(int uid1,int uid2) {
 int FriendManager::reject(int uid1,int uid2) {
   std::lock_guard<std::mutex> lock(mtx_);
 
-  if(requests[uid1].count(uid2)) requests[uid1].erase(uid2);
-  if(requests[uid2].count(uid1)) requests[uid2].erase(uid1);
+  if(requests_[uid1].count(uid2)) requests_[uid1].erase(uid2);
+  if(requests_[uid2].count(uid1)) requests_[uid2].erase(uid1);
   save(FRIENDDATA);
   return true;
 }
 
 bool FriendManager::isFriend(int uid1,int uid2) {
   // std::lock_guard<std::mutex> lock(mtx_);
-  auto it = friends.find(uid1);
-  if(it == friends.end()) {
+  auto it = friends_.find(uid1);
+  if(it == friends_.end()) {
     return false;
   }
   return it->second.count(uid2) > 0;
@@ -227,6 +226,42 @@ bool FriendManager::isFriend(int uid1,int uid2) {
 
 bool FriendManager::removeUsr(int uid) {
 
+}
+
+// 屏蔽/拉黑相关
+int FriendManager::block(int uid,int target) {
+  std::lock_guard lock(mtx_);
+  if(!isFriend(uid,target)) return -1;   // 只能屏蔽好友
+  block_[uid].insert(target);
+  save(FRIENDDATA);
+  return 0;
+}
+
+int FriendManager::unblock(int uid,int target) {
+  std::lock_guard lock(mtx_);
+  block_[uid].erase(target);
+  save(FRIENDDATA);
+  return 0;
+}
+
+bool FriendManager::isBlocked(int uid,int target) {
+  std::lock_guard lock(mtx_);
+  auto it = block_.find(uid);
+  if(it != block_.end() && it->second.count(target) > 0) {
+    return true;
+  }
+  return false;
+}
+
+std::vector<int> FriendManager::getBlockList(int uid) {
+  std::lock_guard lock(mtx_);
+  auto it = block_.find(uid);
+  if(it == block_.end()) return {};
+  std::vector<int> result;
+  for(auto id : it->second) {
+    result.push_back(id);
+  }
+  return result;
 }
 
 bool FriendManager::load(const std::string& path) {
@@ -237,14 +272,14 @@ bool FriendManager::load(const std::string& path) {
   nlohmann::json j;
   ifs >> j;
 
-  friends.clear();
-  requests.clear();
+  friends_.clear();
+  requests_.clear();
 
   if(j.contains("friends")) {
     for(auto& [uid, arr] : j["friends"].items()) {
       int id = std::stoi(uid);
       for(auto& x : arr) {
-        friends[id].insert(x.get<int>());
+        friends_[id].insert(x.get<int>());
       }
     }
   }
@@ -253,29 +288,42 @@ bool FriendManager::load(const std::string& path) {
     for(auto& [uid, arr] : j["requests"].items()) {
       int id = std::stoi(uid);
       for(auto& x : arr) {
-        requests[id].insert(x.get<int>());
+        requests_[id].insert(x.get<int>());
       }
     }
   }
 
+  if(j.contains("block")) {
+    for(auto& [uid, arr] : j["block"].items()) {
+      int id = std::stoi(uid);
+      for(auto& x : arr) {
+        block_[id].insert(x.get<int>());
+      }
+    }
+  }
   return true;
 }
 
 bool FriendManager::save(const std::string& path) {
   nlohmann::json j;
   // 保存好友
-  for(const auto& [uid, list] : friends) {
+  for(const auto& [uid, list] : friends_) {
     for(int id : list) {
       j["friends"][std::to_string(uid)].push_back(id);
     }
   }
   // 保存好友申请
-  for(const auto& [uid, list] : requests) {
+  for(const auto& [uid, list] : requests_) {
     for(int id : list) {
       j["requests"][std::to_string(uid)].push_back(id);
     }
   }
-
+  // 保存屏蔽列表
+  for(const auto& [uid, set] : block_) {
+    for(int blocked_uid : set) {
+      j["block"][std::to_string(uid)].push_back(blocked_uid);
+    }
+  }
   std::ofstream ofs(path);
   if(!ofs.is_open()) return false;
 
