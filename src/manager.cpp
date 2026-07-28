@@ -59,8 +59,7 @@ bool UsrManager::login(const std::string& username,const std::string& password,i
 }
 
 bool UsrManager::delUsr(int uid) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  
+
 }
 
 bool UsrManager::load(const std::string& path) {
@@ -292,37 +291,19 @@ int MessageManager::add(const Message& msg) {
   return 0;
 }
 
-// int MessageManager::addOfflineMsg(const Message& msg) {
-//   std::lock_guard lock(mtx_);
-//   offline_msg_[msg.target_id].push_back(msg);
-//   save(PCHATDATA);
-//   return true;
-// }
-
-// int MessageManager::delOfflineMsg(const std::string& msg_id) {
-//   std::lock_guard lock(mtx_);
-//   for(auto& [uid,list] : offline_msg_) {
-//     auto it = std::remove_if(list.begin(),list.end(),[&](const Message& msg) {
-//         return msg.message_id == msg_id;
-//       });
-
-//     if(it != list.end()) {
-//       list.erase(it,list.end());
-//       return true;
-//     }
-//   }
-//   save(PCHATDATA);
-//   return false;
-// }
-
-// std::vector<Message> MessageManager::getOfflineMsg(int uid) {
-//   std::lock_guard lock(mtx_);
-//   auto it = offline_msg_.find(uid);
-//   if(it == offline_msg_.end()) {
-//     return {};
-//   }
-//   return it->second;
-// }
+std::vector<Message> MessageManager::getMessagesByTime(int uid,uint64_t time) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::vector<Message> result;
+  for(auto& [key, msgs] : history_) {
+    for(auto& msg : msgs) {
+      if((msg.from_uid == uid || msg.target_id == uid) && msg.time > time) {
+        result.push_back(msg);
+      }
+    }
+  }
+  std::sort(result.begin(),result.end(),[](const Message& a,const Message& b) { return a.time < b.time; });
+  return result;
+}
 
 std::vector<Message> MessageManager::getHistory(int uid1,int uid2) {
   std::lock_guard lock(mtx_);
@@ -353,10 +334,7 @@ std::vector<Message> MessageManager::getAllMsg(int uid) {
 }
 
 std::string MessageManager::getMsgId() {
-  uint64_t ms =
-    std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::system_clock::now().time_since_epoch()
-    ).count();
+  uint64_t ms = now_ms();
 
   uint64_t i = count++;
   return std::to_string(ms) + "_" + std::to_string(i);
@@ -433,7 +411,7 @@ bool SessionManager::isOnline(int uid) {
   return user_to_sock_.count(uid);
 }
 
-bool SessionManager::sendTo(int to_uid,const Message& msg) {
+bool SessionManager::sendChatTo(int to_uid,const Message& msg) {
   auto sock = getSock(to_uid);
   if(!sock) return -1;
   nlohmann::json push;
@@ -441,6 +419,15 @@ bool SessionManager::sendTo(int to_uid,const Message& msg) {
   push["type"] = "chat";
   push["action"] = "private_chat";
   push["data"] = msg;
+  if(sock->sendMsg(push.dump()) != NetResult::OK) {
+    return -1;
+  }
+  return 0;
+}
+
+bool SessionManager::sendPushTo(int to_uid,nlohmann::json& push) {
+  auto sock = getSock(to_uid);
+  if(!sock) return -1;
   if(sock->sendMsg(push.dump()) != NetResult::OK) {
     return -1;
   }
