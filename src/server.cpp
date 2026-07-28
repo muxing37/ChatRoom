@@ -21,6 +21,8 @@ public:
   bool setListen(unsigned short port);
   std::shared_ptr<TcpSocket> acceptConn();
 
+
+  
 private:
   int listenfd_;
 };
@@ -33,14 +35,16 @@ public:
   void start();
 
 private:
+  void friendOnPush();
+  void friendOffPush();
   void authServer();
   void friendSever(nlohmann::json j);
   void chatServer(nlohmann::json j);
   void groupServer(nlohmann::json j);
 
 private:
+  User linked_usr_;
   std::shared_ptr<TcpSocket> ctrlSock_;
-
 };
 
 TcpServer::TcpServer()
@@ -91,10 +95,11 @@ std::shared_ptr<TcpSocket> TcpServer::acceptConn() {
 
 nlohmann::json makeReply(const nlohmann::json& j,int status) {
   nlohmann::json reply;
-  reply["msg_type"]="reply";
+  reply["msg_type"] = "reply";
   reply["request_id"] = j["request_id"];
-  reply["status"]=status;
-  reply["time"] =time(nullptr);
+  reply["status"] = status;
+  reply["time"] = now_ms();
+  // time(nullptr);
   return reply;
 }
 
@@ -173,6 +178,19 @@ void Session::friendSever(nlohmann::json j) {
     int to_uid = j["data"]["to_uid"];
     reply["status"] = friendManager.request(to_uid,self_uid);
     ctrlSock_->sendMsg(reply.dump());
+    if(sessionManager.isOnline(to_uid)) {
+      nlohmann::json push;
+      User* usr = usrManager.getUser(self_uid);
+      push["msg_type"] = "push";
+      push["type"] = "friend";
+      push["action"] = "request";
+      push["time"] = now_ms();
+      push["data"] = {
+        {"username",usr->username},
+        {"uid",usr->uid}
+      };
+      sessionManager.sendPushTo(to_uid,push);
+    }
   } else if(j["action"] == "del") {
     int to_uid = j["data"]["to_uid"];
     friendManager.del(self_uid,to_uid);
@@ -183,11 +201,37 @@ void Session::friendSever(nlohmann::json j) {
     friendManager.agree(self_uid,to_uid);
     reply["status"] = 0;
     ctrlSock_->sendMsg(reply.dump());
+    if(sessionManager.isOnline(to_uid)) {
+      nlohmann::json push;
+      User* usr = usrManager.getUser(self_uid);
+      push["msg_type"] = "push";
+      push["type"] = "friend";
+      push["action"] = "agree";
+      push["time"] = now_ms();
+      push["data"] = {
+        {"username",usr->username},
+        {"uid",usr->uid}
+      };
+      sessionManager.sendPushTo(to_uid,push);
+    }
   } else if(j["action"] == "reject") {
     int to_uid = j["data"]["to_uid"];
     friendManager.reject(self_uid,to_uid);
     reply["status"] = 0;
     ctrlSock_->sendMsg(reply.dump());
+    if(sessionManager.isOnline(to_uid)) {
+      nlohmann::json push;
+      User* usr = usrManager.getUser(self_uid);
+      push["msg_type"] = "push";
+      push["type"] = "friend";
+      push["action"] = "reject";
+      push["time"] = now_ms();
+      push["data"] = {
+        {"username",usr->username},
+        {"uid",usr->uid}
+      };
+      sessionManager.sendPushTo(to_uid,push);
+    }
   } else if(j["action"] == "list_friend") {
     reply["status"] = 0;
     auto list = friendManager.list_friend(self_uid);
@@ -226,8 +270,9 @@ void Session::chatServer(nlohmann::json j) {
   if(j["action"] == "private_chat") {
     j["data"]["message_id"] = messageManager.getMsgId();
     auto msg = j["data"].get<Message>();
+    msg.time = now_ms();
     if(sessionManager.isOnline(msg.target_id)) {
-      sessionManager.sendTo(msg.target_id,msg);
+      sessionManager.sendChatTo(msg.target_id,msg);
       msg.status = 1;
       messageManager.add(msg);
     } else {
@@ -248,6 +293,23 @@ void Session::chatServer(nlohmann::json j) {
     }
     ctrlSock_->sendMsg(reply.dump());
   }
+  if(j["action"] == "private_sync_new") {
+    uint64_t last_time = j["data"].value("last_time",0ULL);
+    int uid = j["data"]["from_uid"];
+    auto msgs = messageManager.getMessagesByTime(uid,last_time);
+    nlohmann::json reply = makeReply(j,0);
+    reply["data"]["messages"] = msgs;
+    ctrlSock_->sendMsg(reply.dump());
+  }
+}
+
+void Session::friendOnPush() {
+  // std::vector<int> fri = friendManager.list_friend(sessionManager.getSelf().uid);
+  // for(int& id : fri) {
+  //   if(sessionManager) {
+
+  //   }
+  // }
 }
 
 void Session::start() {
