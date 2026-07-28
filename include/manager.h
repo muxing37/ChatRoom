@@ -51,7 +51,7 @@ public:
   std::vector<int> list_friend(int uid);
   std::vector<int> list_request(int uid);
   int del(int uid1,int uid2);
-  int request(int uid1,int uid2);
+  int request(int from_uid,int to_uid);
   int agree(int uid1,int uid2);
   int reject(int uid1,int uid2);
 
@@ -62,19 +62,25 @@ public:
   bool load(const std::string& path);
   bool save(const std::string& path);
 
+  // 屏蔽/拉黑相关
+  int block(int uid,int target);
+  int unblock(int uid,int target);
+  bool isBlocked(int uid,int target);
+  std::vector<int> getBlockList(int uid);
+
 private:
-  std::unordered_map<int,std::unordered_set<int>> friends;
-  std::unordered_map<int,std::unordered_set<int>> requests;
+  std::unordered_map<int,std::unordered_set<int>> friends_;
+  std::unordered_map<int,std::unordered_set<int>> requests_;
+  std::unordered_map<int,std::unordered_set<int>> block_;
   std::mutex mtx_;
 };
 
 class MessageManager {
 public:
   int add(const Message& msg);
-  // int addOfflineMsg(const Message& msg);
-  // int delOfflineMsg(const std::string& msg_id);
-  // std::vector<Message> getOfflineMsg(int uid);
-  std::vector<Message> getAllMsg(int uid);
+
+  std::vector<Message> getMessagesByTime(int uid,uint64_t time); //获取某个时间后的所有消息，可用于离线消息的同步
+  std::vector<Message> getAllMsg(int uid); //获取所有消息
   std::vector<Message> getHistory(int uid1,int uid2);
   std::string getMsgId();
 
@@ -85,7 +91,6 @@ public:
 
 private:
   std::unordered_map<std::string,std::vector<Message>> history_;
-  // std::unordered_map<int,std::vector<Message>> offline_msg_;
   std::atomic<uint64_t> count{0};
   std::mutex mtx_;
 };
@@ -104,7 +109,8 @@ public:
   std::shared_ptr<TcpSocket> getSock(int user_id);
   
   bool isOnline(int uid);
-  bool sendTo(int uid,const Message& msg);
+  bool sendChatTo(int uid,const Message& msg);
+  bool sendPushTo(int uid,nlohmann::json& push);
 
 private:
   std::unordered_map<int,std::shared_ptr<TcpSocket>> user_to_sock_;

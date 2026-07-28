@@ -3,6 +3,7 @@
 #include <string>
 #include <cstdint>
 #include <nlohmann/json.hpp>
+#include <chrono>
 
 struct User {
     int uid;
@@ -32,6 +33,7 @@ struct Message {
 
     int status;  // 0:待发送(接收方离线) 1:已送达
 };
+
 inline void to_json(nlohmann::json& j,const Message& msg) {
     j = {
         {"message_id",msg.message_id},
@@ -53,4 +55,12 @@ inline void from_json(const nlohmann::json& j,Message& msg) {
     j.at("content").get_to(msg.content);
     j.at("time").get_to(msg.time);
     j.at("status").get_to(msg.status);
+}
+
+uint64_t now_ms() {
+    auto now = std::chrono::system_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()
+    ).count();
+    return static_cast<uint64_t>(ms);
 }

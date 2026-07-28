@@ -11,6 +11,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <functional>
+#include <fstream>
 #include <atomic>
 #include <ctime>
 
@@ -30,13 +31,26 @@ public:
   void delFriend(int uid);
   void setFriendRequests(const std::vector<User>& list);
   std::vector<User> getFriendRequests();
+
+  void addBlock(int uid);
+  void unBlock(int uid);
+  bool isBlocked(int uid);
+  void setBlockList(const std::vector<int>& list);
+  std::vector<int> getBlockList();
   // 聊天相关
   void addMessage(const Message& msg);
   std::vector<Message> getMessage(int id);
   void setMessage(int uid,const std::vector<Message>& msgs);
   void loadMoreMessages(int uid,const std::vector<Message>& msgs);
+  void updateLastSyncTime(uint64_t t);
+  uint64_t getLastSyncTime();
+  bool isMessageRepeat(const std::string& msg_id);
+  void markMessageReceived(const std::string& msg_id);
   // 群组相关
 
+  // 本地信息存储相关
+  std::unordered_map<int,std::vector<Message>> getAllMessages() const;
+  void loadMessages(const std::unordered_map<int,std::vector<Message>>& allMsgs);
 
 private:
   // 用户本人
@@ -44,13 +58,25 @@ private:
   // 好友相关
   std::unordered_map<int,User> friends_;
   std::unordered_map<int,User> friendRequests_;
+  std::unordered_set<int> blocked_;
   // 聊天相关
   std::unordered_map<int,std::vector<Message>> msgs_;
-  
+  uint64_t last_sync_time_ = 0;
+  std::unordered_set<std::string> known_msg_;
   // 群组相关
 
 
   mutable std::mutex mtx_;
+};
+
+class ChatStorage {
+public:
+  ChatStorage(const std::string& filepath);
+  bool save(const ClientContext& ctx);
+  bool load(ClientContext& ctx);
+
+private:
+  std::string filepath_;
 };
 
 class ClientNetwork {
@@ -108,6 +134,10 @@ public:
   int agree(int uid); //同意好友申请
   int reject(int uid); //拒绝好友申请
 
+  int block(int uid); //屏蔽
+  int unblock(int uid); //解除屏蔽
+  int getBlockList(); //获取屏蔽的好友列表
+
 private:
   ClientNetwork& network_;
   ClientContext& ctx_;
@@ -117,7 +147,7 @@ class PrivateChatService {
 public:
   PrivateChatService(ClientNetwork& network,ClientContext& ctx);
   int sendPrivateMessage(int to_uid,const std::string& text); //发送私聊消息
-  int syncHistory(int uid); //从服务端同步聊天记录
+  int syncHistory(); //从服务端同步聊天记录
   std::vector<Message> getMessages(int uid); //从本地ctx获取聊天记录
   void gotPush(const nlohmann::json& push);
 
