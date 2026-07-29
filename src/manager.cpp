@@ -669,7 +669,13 @@ bool SessionManager::sendChatTo(int to_uid,const Message& msg) {
   nlohmann::json push;
   push["msg_type"] = "push";
   push["type"] = "chat";
-  push["action"] = "private_chat";
+  if(msg.chat_type == "private") {
+    push["action"] = "private_chat";
+  }
+  if(msg.chat_type == "group") {
+    push["action"] = "group_chat";
+  }
+  // push["action"] = "private_chat";
   push["data"] = msg;
   if(sock->sendMsg(push.dump()) != NetResult::OK) {
     return -1;

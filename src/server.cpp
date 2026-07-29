@@ -10,6 +10,7 @@ UsrManager usrManager;
 SessionManager sessionManager;
 FriendManager friendManager;
 MessageManager messageManager;
+GroupManager groupManager;
 UidGenerator get_uid;
 
 class TcpServer {
@@ -33,6 +34,7 @@ public:
   void start();
 
 private:
+  bool returnReply(const nlohmann::json& req,int status,nlohmann::json& reply);
   void friendOnPush();
   void friendOffPush();
   void authServer();
@@ -91,14 +93,14 @@ std::shared_ptr<TcpSocket> TcpServer::acceptConn() {
   return std::make_unique<TcpSocket>(fd);
 }
 
-nlohmann::json makeReply(const nlohmann::json& j,int status) {
-  nlohmann::json reply;
+bool Session::returnReply(const nlohmann::json& req,int status,nlohmann::json& reply) {
   reply["msg_type"] = "reply";
-  reply["request_id"] = j["request_id"];
+  reply["request_id"] = req["request_id"];
   reply["status"] = status;
   reply["time"] = now_ms();
-  // time(nullptr);
-  return reply;
+
+  ctrlSock_->sendMsg(reply.dump());
+  return true;
 }
 
 void Session::authServer() {
@@ -111,56 +113,54 @@ void Session::authServer() {
     auto j = nlohmann::json::parse(res);
 
     if(j["type"]!="user") {
-      auto reply=makeReply(j,1);
+      nlohmann::json reply;
       reply["error"]="invalid type";
-      ctrlSock_->sendMsg(reply.dump());
+      returnReply(j,1,reply);
       continue;
     }
-    nlohmann::json reply= makeReply(j,1);
+    nlohmann::json reply;
     int uid;
     if(j["action"]=="register") {
       std::string username = j["data"]["username"];
       std::string password = j["data"]["password"];
       if(usrManager.isExist(username)) {
         reply["error"] ="username exists";
-        ctrlSock_->sendMsg(reply.dump());
+        returnReply(j,1,reply);
         continue;
       }
       uid=get_uid.get();
       if(!usrManager.regis(username,password,uid)) {
         reply["error"] = "register failed";
-        ctrlSock_->sendMsg(reply.dump());
+        returnReply(j,1,reply);
         continue;
       }
       usr = usrManager.getUser(uid);
       usr->online = true;
       usrManager.save(USRDATA);
-      reply["status"]=0;
       reply["data"]={
         {"uid",uid},
         {"username",username}
       };
-      ctrlSock_->sendMsg(reply.dump());
+      returnReply(j,0,reply);
       break;
     } else if(j["action"] == "login") {
       std::string username = j["data"]["username"];
       std::string password = j["data"]["password"];
       if(!usrManager.login(username,password,uid)) {
         reply["error"] ="username or password wrong";
-        ctrlSock_->sendMsg(reply.dump());
+        returnReply(j,1,reply);
         continue;
       }
       usr = usrManager.getUser(uid);
       usr->online = true;
-      reply["status"]=0;
       reply["data"]={
         {"uid",uid},
         {"username",username}
       };
-      ctrlSock_->sendMsg(reply.dump());
+      returnReply(j,0,reply);
       break;
     } else {
-      ctrlSock_->sendMsg(reply.dump());
+      returnReply(j,1,reply);
     }
   }
   linked_usr_.username = usr->username;
@@ -169,13 +169,13 @@ void Session::authServer() {
 
 void Session::friendSever(nlohmann::json j) {
   int self_uid = j["data"]["from_uid"];
-  nlohmann::json reply = makeReply(j,0);
+  nlohmann::json reply;
   reply["type"] = "reply";
   reply["action"] = j["action"];
   if(j["action"] == "request") {
     int to_uid = j["data"]["to_uid"];
-    reply["status"] = friendManager.request(self_uid,to_uid);
-    ctrlSock_->sendMsg(reply.dump());
+    int sta = friendManager.request(self_uid,to_uid);
+    returnReply(j,sta,reply);
     if(sessionManager.isOnline(to_uid)) {
       nlohmann::json push;
       User* usr = usrManager.getUser(self_uid);
@@ -192,13 +192,11 @@ void Session::friendSever(nlohmann::json j) {
   } else if(j["action"] == "del") {
     int to_uid = j["data"]["to_uid"];
     friendManager.del(self_uid,to_uid);
-    reply["status"] = 0;
-    ctrlSock_->sendMsg(reply.dump());
+    returnReply(j,0,reply);
   } else if(j["action"] == "agree") {
     int to_uid = j["data"]["to_uid"];
     friendManager.agree(self_uid,to_uid);
-    reply["status"] = 0;
-    ctrlSock_->sendMsg(reply.dump());
+    returnReply(j,0,reply);
     if(sessionManager.isOnline(to_uid)) {
       nlohmann::json push;
       User* usr = usrManager.getUser(self_uid);
@@ -215,8 +213,7 @@ void Session::friendSever(nlohmann::json j) {
   } else if(j["action"] == "reject") {
     int to_uid = j["data"]["to_uid"];
     friendManager.reject(self_uid,to_uid);
-    reply["status"] = 0;
-    ctrlSock_->sendMsg(reply.dump());
+    returnReply(j,0,reply);
     if(sessionManager.isOnline(to_uid)) {
       nlohmann::json push;
       User* usr = usrManager.getUser(self_uid);
@@ -231,7 +228,6 @@ void Session::friendSever(nlohmann::json j) {
       sessionManager.sendPushTo(to_uid,push);
     }
   } else if(j["action"] == "list_friend") {
-    reply["status"] = 0;
     auto list = friendManager.list_friend(self_uid);
     for(int uid : list) {
       User *u = usrManager.getUser(uid);
@@ -243,9 +239,8 @@ void Session::friendSever(nlohmann::json j) {
         {"online",u->online}
       });
     }
-    ctrlSock_->sendMsg(reply.dump());
+    returnReply(j,0,reply);
   } else if(j["action"] == "list_request") {
-    reply["status"] = 0;
     auto list = friendManager.list_request(self_uid);
     for(int uid : list) {
       User *u = usrManager.getUser(uid);
@@ -255,25 +250,23 @@ void Session::friendSever(nlohmann::json j) {
         {"username",u->username}
       });
     }
-    ctrlSock_->sendMsg(reply.dump());
+    returnReply(j,0,reply);
   } else if (j["action"] == "block") {
     int to_uid = j["data"]["to_uid"];
-    reply["status"] = friendManager.block(self_uid,to_uid);
-    ctrlSock_->sendMsg(reply.dump());
+    int sta = friendManager.block(self_uid,to_uid);
+    returnReply(j,sta,reply);
   } else if (j["action"] == "unblock") {
     int to_uid = j["data"]["to_uid"];
-    reply["status"] = friendManager.unblock(self_uid,to_uid);
-    ctrlSock_->sendMsg(reply.dump());
+    int sta = friendManager.unblock(self_uid,to_uid);
+    returnReply(j,sta,reply);
   } else if (j["action"] == "list_block") {
     auto list = friendManager.getBlockList(self_uid);
-    reply["status"] = 0;
     reply["data"]["block_list"] = list;
-    ctrlSock_->sendMsg(reply.dump());
+    returnReply(j,0,reply);
   } else {
-    reply["status"] = -1;
+    // reply["status"] = -1;
     reply["data"]["message"] = "unknown action";
-
-    ctrlSock_->sendMsg(reply.dump());
+    returnReply(j,-1,reply);
   }
 }
 
@@ -281,9 +274,9 @@ void Session::chatServer(nlohmann::json j) {
   if(j["action"] == "private_chat") {
     auto msg = j["data"].get<Message>();
     if (friendManager.isBlocked(msg.target_id,msg.from_uid)) {
-      nlohmann::json reply = makeReply(j, -1);
+      nlohmann::json reply;
       reply["error"] = "blocked by receiver";
-      ctrlSock_->sendMsg(reply.dump());
+      returnReply(j,-1,reply);
       return;
     }
     j["data"]["message_id"] = messageManager.getMsgId();
@@ -296,27 +289,31 @@ void Session::chatServer(nlohmann::json j) {
       msg.status = 0;
       messageManager.add(msg);
     }
-    nlohmann::json reply = makeReply(j,0);
+    nlohmann::json reply;
     reply["data"] = msg;
-    ctrlSock_->sendMsg(reply.dump());
+    returnReply(j,0,reply);
   }
   if(j["action"] == "private_history_all") {
     std::vector<Message> result;
     result = messageManager.getAllMsg(j["data"]["from_uid"]);
-    nlohmann::json reply = makeReply(j,0);
+    nlohmann::json reply;
     for(auto& msg : result) {
       reply["data"].push_back(msg);
     }
-    ctrlSock_->sendMsg(reply.dump());
+    returnReply(j,0,reply);
   }
   if(j["action"] == "private_sync_new") {
     uint64_t last_time = j["data"].value("last_time",0ULL);
     int uid = j["data"]["from_uid"];
     auto msgs = messageManager.getMessagesByTime(uid,last_time);
-    nlohmann::json reply = makeReply(j,0);
+    nlohmann::json reply;
     reply["data"]["messages"] = msgs;
-    ctrlSock_->sendMsg(reply.dump());
+    returnReply(j,0,reply);
   }
+}
+
+void Session::groupServer(nlohmann::json j) {
+
 }
 
 void Session::friendOnPush() {
