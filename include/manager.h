@@ -109,7 +109,7 @@ public:
   // 管理员设置
   int setAdmin(int group_id,int handler_uid,int target_id,bool admin);
   // 消息免打扰设置
-  int setRemind(int group_id,int uid,bool remind);
+  int setRemind(int group_id,int uid,int remind);
   // 查询相关
   GroupInfo getGroupInfo(int group_id);
   std::vector<GroupMember> getMembers(int group_id);

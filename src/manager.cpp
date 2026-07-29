@@ -460,7 +460,7 @@ int GroupManager::creatGroup(int owner_uid,std::string& name,int& out_gid) {
   groups_[gid] = info;
   GroupMember owner {
     owner_uid,
-    2,
+    0,
     info.creat_time,
     false
   };
@@ -475,7 +475,7 @@ int GroupManager::delGroup(int group_id,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
   auto it = groups_.find(group_id);
   if(it == groups_.end()) return -1; // 群不存在
-  if(it->second.owner_uid != operator_uid) return -2; // 非群主
+  if(uid != it->second.owner_uid) return -2; // 非群主
   groups_.erase(it);
   members_.erase(group_id);
   join_requests_.erase(group_id);
@@ -495,32 +495,80 @@ int GroupManager::transferOwner() { // 转移群主
 // 成员管理
 int GroupManager::joinRequest(int group_id,int apply_uid) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  if(groups_.find(group_id) == groups_.end()) return -1; // 群不存在
+  if(members_[group_id].count(apply_uid)) return -2; // 已是成员
+  if(join_requests_[group_id].count(apply_uid)) return -3; // 已申请
+  join_requests_[group_id].insert(apply_uid);
+  save(GROUPDATA);
+  return 0;
 }
 
 int GroupManager::handleRequest(int group_id,int handler_uid,int target_id,bool approval) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  auto& req = join_requests_[group_id];
+  if(!req.count(target_id)) return -1; // 不存在该申请
+  if(approval) {
+    auto& mem = members_[group_id];
+    if(!mem.count(handler_uid) || mem[handler_uid].permission > 1) return -2; // 没有权限
+    GroupMember info {
+      target_id,
+      2,
+      now_ms(),
+      false
+    };
+    mem[target_id] = info;
+    req.erase(target_id);
+  } else {
+    req.erase(target_id);
+  }
+  save(GROUPDATA);
+  return 0;
 }
 
 int GroupManager::leaveGroup(int group_id,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  auto& mem = members_[group_id];
+  if(!mem.count(uid)) return -1;
+  if(mem[uid].permission == 0) return -2;  // 群主不能直接退出，应先解散或转让群主权限
+  mem.erase(uid);
+  save(GROUPDATA);
+  return 0;
 }
 
 int GroupManager::kickMember(int group_id,int handler_uid,int target_id) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  auto& mem = members_[group_id];
+  if(!mem.count(handler_uid) || !mem.count(target_id)) return -1;
+  int hand_per = mem[handler_uid].permission;
+  int target_per = mem[target_id].permission;
+  if(hand_per == 2) return -2; // 普通成员无权限
+  if(hand_per == 1 && (target_per == 0 || target_per == 1)) return -3; // 管理员无权踢群主或其他管理员
+  mem.erase(target_id);
+  save(GROUPDATA);
+  return 0;
 }
 // 管理员设置
 int GroupManager::setAdmin(int group_id,int handler_uid,int target_id,bool admin) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  auto& mem = members_[group_id];
+  if(!mem.count(handler_uid) || mem[handler_uid].permission != 0) return -1; // 仅群主有权限
+  if(!mem.count(target_id)) return -2;
+  if(admin) {
+    mem[target_id].permission = 1;
+  } else {
+    mem[target_id].permission = 2;
+  }
+  save(GROUPDATA);
+  return 0;
 }
 // 消息免打扰设置
-int GroupManager::setRemind(int group_id,int uid,bool remind) {
+int GroupManager::setRemind(int group_id,int uid,int remind) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  auto& mem = members_[group_id];
+  if(!mem.count(uid)) return -1;
+  mem[uid].remind = remind;
+  save(GROUPDATA);
+  return 0;
 }
 // 查询相关
 GroupInfo GroupManager::getGroupInfo(int group_id) {
