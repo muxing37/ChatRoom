@@ -4,6 +4,7 @@ const std::string SAVEPATH = "./data";
 const std::string USRDATA = SAVEPATH + "/usrdata.json";
 const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
 const std::string PCHATDATA = SAVEPATH + "/pchatdata.json";
+const std::string GROUPDATA = SAVEPATH + "/groupdata.json";
 
 std::string privateId(int uid1, int uid2) {
   if(uid1 > uid2) std::swap(uid1, uid2);
@@ -12,7 +13,7 @@ std::string privateId(int uid1, int uid2) {
 std::string groupId(int groupId) {
   return "group_" + std::to_string(groupId);
 }
-
+// 用户管理相关
 bool UsrManager::verify(const std::string& username,const std::string& password) {
 
 }
@@ -141,6 +142,7 @@ User* UsrManager::getUser(int uid) {
   return usr;
 }
 
+// 好友管理相关
 std::vector<int> FriendManager::list_friend(int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
 
@@ -228,7 +230,7 @@ bool FriendManager::removeUsr(int uid) {
 
 }
 
-// 屏蔽/拉黑相关
+// 好友屏蔽/拉黑相关
 int FriendManager::block(int uid,int target) {
   std::lock_guard lock(mtx_);
   if(!isFriend(uid,target)) return -1;   // 只能屏蔽好友
@@ -331,6 +333,7 @@ bool FriendManager::save(const std::string& path) {
   return true;
 }
 
+// 消息管理相关
 int MessageManager::add(const Message& msg) {
   std::lock_guard lock(mtx_);
   std::string cvs_id = privateId(msg.from_uid,msg.target_id);
@@ -442,6 +445,127 @@ bool MessageManager::load(const std::string& path) {
     count.store(0);
   }
   return true;
+}
+
+// 群管理相关
+int GroupManager::creatGroup(int owner_uid,std::string& name,int& out_gid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  int gid = makeGroupId();
+  GroupInfo info {
+    gid,
+    name,
+    owner_uid,
+    now_ms()
+  };
+  groups_[gid] = info;
+  GroupMember owner {
+    owner_uid,
+    2,
+    info.creat_time,
+    false
+  };
+  members_[gid][owner_uid] = owner;
+
+  out_gid = gid;
+  save(GROUPDATA);
+  return 0;
+}
+
+int GroupManager::delGroup(int group_id,int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = groups_.find(group_id);
+  if(it == groups_.end()) return -1; // 群不存在
+  if(it->second.owner_uid != operator_uid) return -2; // 非群主
+  groups_.erase(it);
+  members_.erase(group_id);
+  join_requests_.erase(group_id);
+  save(GROUPDATA);
+  return 0;
+}
+
+int GroupManager::renameGroup(int group_id,int handler_id,std::string& new_name) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+int GroupManager::transferOwner() { // 转移群主
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+// 成员管理
+int GroupManager::joinRequest(int group_id,int apply_uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+int GroupManager::handleRequest(int group_id,int handler_uid,int target_id,bool approval) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+int GroupManager::leaveGroup(int group_id,int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+int GroupManager::kickMember(int group_id,int handler_uid,int target_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+// 管理员设置
+int GroupManager::setAdmin(int group_id,int handler_uid,int target_id,bool admin) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+// 消息免打扰设置
+int GroupManager::setRemind(int group_id,int uid,bool remind) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+// 查询相关
+GroupInfo GroupManager::getGroupInfo(int group_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+std::vector<GroupMember> GroupManager::getMembers(int group_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+std::vector<int> GroupManager::getUserGroup(int uid) { // 获取某用户所在的所有群id
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+bool GroupManager::isMember(int group_uid,int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+int GroupManager::getPermission(int group_id,int uid) { // 查询某用户在群中的权限
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+uint64_t GroupManager::getJoinTime(int group_id,int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+bool GroupManager::ifRemind(int group_id,int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+bool GroupManager::load(const std::string& path) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+}
+
+bool GroupManager::save(const std::string& path) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
 }
 
 void SessionManager::unbindUser(int user_id) {

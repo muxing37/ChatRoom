@@ -20,6 +20,26 @@ struct Account {
     std::string salt;
 };
 
+struct GroupInfo {
+    int group_id;
+    std::string name;
+    int owner_uid;
+    uint64_t creat_time;
+};
+
+struct GroupMember {
+    int uid;
+    int permission; // 0:群主 1:管理员 2:普通成员
+    uint64_t join_time;
+    int remind; // 消息免打扰选项 0:正常通知 1:接收消息但不通知 2:不接收消息
+};
+
+struct JoinRequest { // 好友/加群申请时间、留言等
+    int uid;
+    uint64_t apply_time;
+    std::string text;
+};
+
 struct Message {
     std::string message_id;
     std::string type; // text, file, system

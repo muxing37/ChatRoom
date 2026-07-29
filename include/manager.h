@@ -97,9 +97,42 @@ private:
 
 class GroupManager {
 public:
+  int creatGroup(int owner_uid,std::string& name,int& out_gid);
+  int delGroup(int group_id,int uid);
+  int renameGroup(int group_id,int handler_id,std::string& new_name);
+  int transferOwner(); // 转移群主
+  // 成员管理
+  int joinRequest(int group_id,int apply_uid);
+  int handleRequest(int group_id,int handler_uid,int target_id,bool approval);
+  int leaveGroup(int group_id,int uid);
+  int kickMember(int group_id,int handler_uid,int target_id);
+  // 管理员设置
+  int setAdmin(int group_id,int handler_uid,int target_id,bool admin);
+  // 消息免打扰设置
+  int setRemind(int group_id,int uid,bool remind);
+  // 查询相关
+  GroupInfo getGroupInfo(int group_id);
+  std::vector<GroupMember> getMembers(int group_id);
+  std::vector<int> getUserGroup(int uid); // 获取某用户所在的所有群id
+  bool isMember(int group_uid,int uid);
+  int getPermission(int group_id,int uid); // 查询某用户在群中的权限
+  uint64_t getJoinTime(int group_id,int uid);
+  bool ifRemind(int group_id,int uid);
+
+  bool load(const std::string& path);
+  bool save(const std::string& path);
 
 private:
+  int makeGroupId() {
+    return next_group_id_++;
+  }
 
+private:
+  std::unordered_map<int,GroupInfo> groups_; // group_id -> info
+  std::unordered_map<int,std::unordered_map<int,GroupMember>> members_; // group_id -> uid -> info
+  std::unordered_map<int,std::unordered_set<int>> join_requests_; // group_id -> set<apply_uid>
+  std::atomic<int> next_group_id_{100000};
+  std::mutex mtx_;
 };
 
 class SessionManager {
