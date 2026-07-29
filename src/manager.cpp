@@ -573,37 +573,69 @@ int GroupManager::setRemind(int group_id,int uid,int remind) {
 // 查询相关
 GroupInfo GroupManager::getGroupInfo(int group_id) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  auto it = groups_.find(group_id);
+  if(it != groups_.end()) {
+    return it->second;
+  }
+  return {};
 }
 
 std::vector<GroupMember> GroupManager::getMembers(int group_id) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  std::vector<GroupMember> res;
+  auto it = members_.find(group_id);
+  if(it != members_.end()) {
+    for(auto& [uid, info] : it->second) res.push_back(info);
+  }
+  return res;
 }
 
 std::vector<int> GroupManager::getUserGroup(int uid) { // 获取某用户所在的所有群id
   std::lock_guard<std::mutex> lock(mtx_);
-
+  std::vector<int> res;
+  for(auto& [gid, memMap] : members_) {
+    if(memMap.count(uid)) res.push_back(gid);
+  }
+  return res;
 }
 
-bool GroupManager::isMember(int group_uid,int uid) {
+bool GroupManager::isMember(int group_id,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  auto it = members_.find(group_id);
+  if(it != members_.end() && it->second.count(uid) > 0) {
+    return true;
+  }
+  return false;
 }
 
 int GroupManager::getPermission(int group_id,int uid) { // 查询某用户在群中的权限
   std::lock_guard<std::mutex> lock(mtx_);
-
+  auto it = members_.find(group_id);
+  if(it != members_.end()) {
+    auto iter = it->second.find(uid);
+    if(iter != it->second.end()) return iter->second.permission;
+  }
+  return -1; // 非成员
 }
 
 uint64_t GroupManager::getJoinTime(int group_id,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  auto it = members_.find(group_id);
+  if(it != members_.end()) {
+    auto iter = it->second.find(uid);
+    if(iter != it->second.end()) return iter->second.join_time;
+  }
+  return 0; // 非成员
 }
 
-bool GroupManager::ifRemind(int group_id,int uid) {
+int GroupManager::ifRemind(int group_id,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  auto it = members_.find(group_id);
+  if(it != members_.end()) {
+    auto iter = it->second.find(uid);
+    if(iter != it->second.end()) return iter->second.remind;
+  }
+  return -1;
 }
 
 bool GroupManager::load(const std::string& path) {

@@ -114,10 +114,10 @@ public:
   GroupInfo getGroupInfo(int group_id);
   std::vector<GroupMember> getMembers(int group_id);
   std::vector<int> getUserGroup(int uid); // 获取某用户所在的所有群id
-  bool isMember(int group_uid,int uid);
+  bool isMember(int group_id,int uid);
   int getPermission(int group_id,int uid); // 查询某用户在群中的权限
   uint64_t getJoinTime(int group_id,int uid);
-  bool ifRemind(int group_id,int uid);
+  int ifRemind(int group_id,int uid);
 
   bool load(const std::string& path);
   bool save(const std::string& path);
