@@ -27,12 +27,43 @@ struct GroupInfo {
     uint64_t creat_time;
 };
 
+inline void to_json(nlohmann::json& j,const GroupInfo& g) {
+    j = {
+        {"group_id",g.group_id},
+        {"name",g.name},
+        {"owner_uid",g.owner_uid},
+        {"creat_time",g.creat_time}
+    };
+}
+inline void from_json(const nlohmann::json& j,GroupInfo& g) {
+    j.at("group_id").get_to(g.group_id);
+    j.at("name").get_to(g.name);
+    j.at("owner_uid").get_to(g.owner_uid);
+    j.at("creat_time").get_to(g.creat_time);
+}
+
 struct GroupMember {
     int uid;
+    std::string usr_name;
     int permission; // 0:群主 1:管理员 2:普通成员
     uint64_t join_time;
     int remind; // 消息免打扰选项 0:正常通知 1:接收消息但不通知 2:不接收消息
 };
+
+inline void to_json(nlohmann::json& j,const GroupMember& m) {
+    j = {
+        {"uid",m.uid},
+        {"permission",m.permission},
+        {"join_time",m.join_time},
+        {"remind",m.remind}
+    };
+}
+inline void from_json(const nlohmann::json& j,GroupMember& m) {
+    j.at("uid").get_to(m.uid);
+    j.at("permission").get_to(m.permission);
+    j.at("join_time").get_to(m.join_time);
+    j.at("remind").get_to(m.remind);
+}
 
 struct JoinRequest { // 好友/加群申请时间、留言等
     int uid;
@@ -77,7 +108,7 @@ inline void from_json(const nlohmann::json& j,Message& msg) {
     j.at("status").get_to(msg.status);
 }
 
-uint64_t now_ms() {
+inline uint64_t now_ms() {
     auto now = std::chrono::system_clock::now();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()

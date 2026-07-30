@@ -97,13 +97,14 @@ private:
 
 class GroupManager {
 public:
-  int creatGroup(int owner_uid,std::string& name,int& out_gid);
+  // int creatGroup(int owner_uid,std::string& name,int& out_gid);
+  int creatGroup(const User& owner,std::string& name,int& out_gid);
   int delGroup(int group_id,int uid);
   int renameGroup(int group_id,int handler_id,std::string& new_name);
   int transferOwner(); // 转移群主
   // 成员管理
   int joinRequest(int group_id,int apply_uid);
-  int handleRequest(int group_id,int handler_uid,int target_id,bool approval);
+  int handleRequest(int group_id,int handler_uid,const User& target_usr,bool approval);
   int leaveGroup(int group_id,int uid);
   int kickMember(int group_id,int handler_uid,int target_id);
   // 管理员设置
@@ -113,6 +114,7 @@ public:
   // 查询相关
   GroupInfo getGroupInfo(int group_id);
   std::vector<GroupMember> getMembers(int group_id);
+  std::vector<int> listJoinRequests(int group_id);
   std::vector<int> getUserGroup(int uid); // 获取某用户所在的所有群id
   bool isMember(int group_id,int uid);
   int getPermission(int group_id,int uid); // 查询某用户在群中的权限

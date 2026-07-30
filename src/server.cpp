@@ -5,6 +5,8 @@
 const std::string SAVEPATH = "./data";
 const std::string USRDATA = SAVEPATH + "/usrdata.json";
 const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
+const std::string PCHATDATA = SAVEPATH + "/pchatdata.json";
+const std::string GROUPDATA = SAVEPATH + "/groupdata.json";
 
 UsrManager usrManager;
 SessionManager sessionManager;
@@ -28,7 +30,6 @@ private:
 
 class Session {
 public:
-
   Session(std::shared_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {}
 
   void start();
@@ -273,7 +274,7 @@ void Session::friendSever(nlohmann::json j) {
 void Session::chatServer(nlohmann::json j) {
   if(j["action"] == "private_chat") {
     auto msg = j["data"].get<Message>();
-    if (friendManager.isBlocked(msg.target_id,msg.from_uid)) {
+    if(friendManager.isBlocked(msg.target_id,msg.from_uid)) {
       nlohmann::json reply;
       reply["error"] = "blocked by receiver";
       returnReply(j,-1,reply);
@@ -293,27 +294,167 @@ void Session::chatServer(nlohmann::json j) {
     reply["data"] = msg;
     returnReply(j,0,reply);
   }
-  if(j["action"] == "private_history_all") {
-    std::vector<Message> result;
-    result = messageManager.getAllMsg(j["data"]["from_uid"]);
+  if(j["action"] = "group_chat") {
+    auto msg = j["data"].get<Message>();
+    msg.chat_type = "group";
+    msg.time = now_ms();
+    msg.message_id = messageManager.getMsgId();
     nlohmann::json reply;
-    for(auto& msg : result) {
-      reply["data"].push_back(msg);
+    int gid = msg.target_id;
+    int self_uid = msg.from_uid;
+    if(!groupManager.isMember(gid,self_uid)) {
+      returnReply(j,-1,reply);  // 非成员
+      return;
     }
+    messageManager.add(msg);
+    auto members = groupManager.getMembers(gid);
+// 此处需优化
+    for(auto& m : members) {
+      if (m.uid == self_uid) continue; // 不发给自己
+      if(sessionManager.isOnline(m.uid)) {
+        sessionManager.sendChatTo(m.uid,msg);
+      }
+    }
+    reply["data"] = msg;
+    returnReply(j,0,reply);
+// 此处需优化
+  }
+  if(j["action"] == "history_all") {
+    int self_uid = j["data"]["from_uid"];
+    std::vector<Message> all = messageManager.getAllMsg(self_uid); // 此处需优化getAllMsg，加入过滤
+    std::vector<Message> result;
+    nlohmann::json reply;
+    for(auto& msg : all) {
+      if(msg.chat_type == "group") {
+        uint64_t join_time = groupManager.getJoinTime(msg.target_id,self_uid);
+        if(msg.time < join_time) continue;
+      }
+      result.push_back(msg);
+    }
+    reply["data"]["messages"] = result;
     returnReply(j,0,reply);
   }
-  if(j["action"] == "private_sync_new") {
+  if(j["action"] == "sync_new") {
     uint64_t last_time = j["data"].value("last_time",0ULL);
     int uid = j["data"]["from_uid"];
-    auto msgs = messageManager.getMessagesByTime(uid,last_time);
+    auto msgs = messageManager.getMessagesByTime(uid,last_time); // 同上，此处需优化，加入过滤
+    std::vector<Message> result;
     nlohmann::json reply;
-    reply["data"]["messages"] = msgs;
+    for(auto& msg : msgs) {
+      if(msg.chat_type == "group") {
+        uint64_t join_time = groupManager.getJoinTime(msg.target_id,uid);
+        if(msg.time < join_time) continue;
+      }
+      result.push_back(msg);
+    }
+    reply["data"]["messages"] = result;
     returnReply(j,0,reply);
   }
 }
 
 void Session::groupServer(nlohmann::json j) {
-
+  nlohmann::json reply;
+  int self_uid = j["data"]["from_uid"];
+  if(j["action"] == "create") {
+    std::string name = j["data"]["group_name"];
+    int gid;
+    int sta = groupManager.creatGroup(*(usrManager.getUser(self_uid)),name,gid);
+    if(sta == 0) {
+      GroupInfo info = groupManager.getGroupInfo(gid);
+      reply["data"]["group_id"] = gid;
+      reply["data"]["name"] = info.name;
+      reply["data"]["owner_uid"] = info.owner_uid;
+      reply["data"]["creat_time"] = info.creat_time;
+    }
+    returnReply(j,sta,reply);
+  }
+  if(j["action"] == "del") {
+    int gid = j["data"]["group_id"];
+    int sta = groupManager.delGroup(gid,self_uid);
+    returnReply(j,sta,reply);
+  }
+  if(j["action"] == "join_request") {
+    int gid = j["data"]["group_id"];
+    int sta = groupManager.joinRequest(gid,self_uid);
+    returnReply(j,sta,reply);
+  }
+  if(j["action"] == "handle_request") {
+    int gid = j["data"]["group_id"];
+    int target_uid = j["data"]["target_uid"];
+    bool approval = j["data"]["approval"];
+    int sta = groupManager.handleRequest(gid,self_uid,*(usrManager.getUser(target_uid)),approval);
+    returnReply(j,sta,reply);
+  }
+  if(j["action"] == "leave") {
+    int gid = j["data"]["group_id"];
+    int sta = groupManager.leaveGroup(gid,self_uid);
+    returnReply(j,sta,reply);
+  }
+  if(j["action"] == "kick") {
+    int gid = j["data"]["group_id"];
+    int target_uid = j["data"]["target_uid"];
+    int sta = groupManager.kickMember(gid,self_uid,target_uid);
+    returnReply(j,sta,reply);
+  }
+  if(j["action"] == "set_admin") {
+    int gid = j["data"]["group_id"];
+    int target_uid = j["data"]["target_uid"];
+    bool admin = j["data"]["is_admin"];
+    int sta = groupManager.setAdmin(gid,self_uid,target_uid,admin);
+    returnReply(j,sta,reply);
+  }
+  if(j["action"] == "set_remind") {
+    int gid = j["data"]["group_id"];
+    int remind = j["data"]["remind"];
+    int sta = groupManager.setRemind(gid,self_uid,remind);
+    returnReply(j,sta,reply);
+  }
+  if(j["action"] == "list_my_groups") {
+    auto gids = groupManager.getUserGroup(self_uid);
+    nlohmann::json res = nlohmann::json::array();
+    for(int gid : gids) {
+      GroupInfo info = groupManager.getGroupInfo(gid);
+      if(info.group_id != 0) {
+        res.push_back({
+          {"group_id",info.group_id},
+          {"group_name",info.name},
+          {"owner_uid",info.owner_uid},
+          {"create_time",info.creat_time}
+        });
+      }
+    }
+    reply["data"]["groups"] = res;
+    returnReply(j,0,reply);
+  }
+  if(j["action"] == "list_join_requests") {
+    int gid = j["data"]["group_id"];
+    if(groupManager.getPermission(gid,self_uid) > 1) {
+      returnReply(j,-1,reply);
+      return;
+    }
+    auto uid_list = groupManager.listJoinRequests(gid);
+    for(int uid : uid_list) {
+      User* u = usrManager.getUser(uid);
+      if(!u) continue;
+      reply["data"]["requests"].push_back(
+        {
+          {"uid",u->uid},
+          {"username",u->username}
+        }
+      );
+    }
+    returnReply(j,0,reply);
+  }
+  if(j["action"] == "list_members") {
+    int gid = j["data"]["group_id"];
+    auto members = groupManager.getMembers(gid);
+    nlohmann::json res = nlohmann::json::array();
+    for(auto& m : members) {
+      res.push_back(m);
+    }
+    reply["data"]["members"] = res;
+    returnReply(j,0,reply);
+  }
 }
 
 void Session::friendOnPush() {
@@ -374,6 +515,10 @@ void Session::start() {
       chatServer(j);
       continue;
     }
+    if(j["type"] == "group") {
+      groupServer(j);
+      continue;
+    }
   }
   friendOffPush();
   sessionManager.unbindUser(linked_usr_.uid);
@@ -392,7 +537,6 @@ int start_server() {
     std::cerr << "[FAIL] setListen failed\n";
     return 1;
   }
-  std::cout << "[INFO] server listening on port 2100...\n";
 
   while(true) {
     std::cout << "[INFO] server listening on port 2100...\n";
@@ -409,6 +553,5 @@ int start_server() {
       }
     ).detach();
   }
-
   return 0;
 }

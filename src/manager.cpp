@@ -448,23 +448,24 @@ bool MessageManager::load(const std::string& path) {
 }
 
 // 群管理相关
-int GroupManager::creatGroup(int owner_uid,std::string& name,int& out_gid) {
+int GroupManager::creatGroup(const User& owner,std::string& name,int& out_gid) {
   std::lock_guard<std::mutex> lock(mtx_);
   int gid = makeGroupId();
   GroupInfo info {
     gid,
     name,
-    owner_uid,
+    owner.uid,
     now_ms()
   };
   groups_[gid] = info;
-  GroupMember owner {
-    owner_uid,
+  GroupMember owner_info {
+    owner.uid,
+    owner.username,
     0,
     info.creat_time,
-    false
+    0
   };
-  members_[gid][owner_uid] = owner;
+  members_[gid][owner.uid] = owner_info;
 
   out_gid = gid;
   save(GROUPDATA);
@@ -503,23 +504,24 @@ int GroupManager::joinRequest(int group_id,int apply_uid) {
   return 0;
 }
 
-int GroupManager::handleRequest(int group_id,int handler_uid,int target_id,bool approval) {
+int GroupManager::handleRequest(int group_id,int handler_uid,const User& target_usr,bool approval) {
   std::lock_guard<std::mutex> lock(mtx_);
   auto& req = join_requests_[group_id];
-  if(!req.count(target_id)) return -1; // 不存在该申请
+  if(!req.count(target_usr.uid)) return -1; // 不存在该申请
   if(approval) {
     auto& mem = members_[group_id];
     if(!mem.count(handler_uid) || mem[handler_uid].permission > 1) return -2; // 没有权限
     GroupMember info {
-      target_id,
+      target_usr.uid,
+      target_usr.username,
       2,
       now_ms(),
-      false
+      0
     };
-    mem[target_id] = info;
-    req.erase(target_id);
+    mem[target_usr.uid] = info;
+    req.erase(target_usr.uid);
   } else {
-    req.erase(target_id);
+    req.erase(target_usr.uid);
   }
   save(GROUPDATA);
   return 0;
@@ -577,7 +579,16 @@ GroupInfo GroupManager::getGroupInfo(int group_id) {
   if(it != groups_.end()) {
     return it->second;
   }
-  return {};
+  return {0};
+}
+
+std::vector<int> GroupManager::listJoinRequests(int group_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::vector<int> res;
+  auto it = join_requests_.find(group_id);
+  if(it == join_requests_.end()) return res;
+  for(int uid : it->second) res.push_back(uid);
+  return res;
 }
 
 std::vector<GroupMember> GroupManager::getMembers(int group_id) {
