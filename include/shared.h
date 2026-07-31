@@ -24,7 +24,7 @@ struct GroupInfo {
     int group_id;
     std::string name;
     int owner_uid;
-    uint64_t creat_time;
+    uint64_t create_time;
 };
 
 inline void to_json(nlohmann::json& j,const GroupInfo& g) {
@@ -32,14 +32,14 @@ inline void to_json(nlohmann::json& j,const GroupInfo& g) {
         {"group_id",g.group_id},
         {"name",g.name},
         {"owner_uid",g.owner_uid},
-        {"creat_time",g.creat_time}
+        {"create_time",g.create_time}
     };
 }
 inline void from_json(const nlohmann::json& j,GroupInfo& g) {
     j.at("group_id").get_to(g.group_id);
     j.at("name").get_to(g.name);
     j.at("owner_uid").get_to(g.owner_uid);
-    j.at("creat_time").get_to(g.creat_time);
+    j.at("create_time").get_to(g.create_time);
 }
 
 struct GroupMember {

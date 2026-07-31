@@ -16,6 +16,7 @@ std::string groupId(int groupId) {
 // 用户管理相关
 bool UsrManager::verify(const std::string& username,const std::string& password) {
 
+  return true;
 }
 
 bool UsrManager::regis(const std::string& username,const std::string& password,int uid) {
@@ -61,6 +62,7 @@ bool UsrManager::login(const std::string& username,const std::string& password,i
 
 bool UsrManager::delUsr(int uid) {
 
+  return true;
 }
 
 bool UsrManager::load(const std::string& path) {
@@ -228,6 +230,7 @@ bool FriendManager::isFriend(int uid1,int uid2) {
 
 bool FriendManager::removeUsr(int uid) {
 
+  return true;
 }
 
 // 好友屏蔽/拉黑相关
@@ -393,6 +396,7 @@ std::string MessageManager::getMsgId() {
 
 bool MessageManager::removeUsr(int uid) {
 
+  return true;
 }
 
 bool MessageManager::save(const std::string& path) {
@@ -448,7 +452,7 @@ bool MessageManager::load(const std::string& path) {
 }
 
 // 群管理相关
-int GroupManager::creatGroup(const User& owner,std::string& name,int& out_gid) {
+int GroupManager::createGroup(const User& owner,std::string& name,int& out_gid) {
   std::lock_guard<std::mutex> lock(mtx_);
   int gid = makeGroupId();
   GroupInfo info {
@@ -462,7 +466,7 @@ int GroupManager::creatGroup(const User& owner,std::string& name,int& out_gid) {
     owner.uid,
     owner.username,
     0,
-    info.creat_time,
+    info.create_time,
     0
   };
   members_[gid][owner.uid] = owner_info;
@@ -472,7 +476,7 @@ int GroupManager::creatGroup(const User& owner,std::string& name,int& out_gid) {
   return 0;
 }
 
-int GroupManager::delGroup(int group_id,int uid) {
+int GroupManager::disbandGroup(int group_id,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
   auto it = groups_.find(group_id);
   if(it == groups_.end()) return -1; // 群不存在
@@ -487,11 +491,13 @@ int GroupManager::delGroup(int group_id,int uid) {
 int GroupManager::renameGroup(int group_id,int handler_id,std::string& new_name) {
   std::lock_guard<std::mutex> lock(mtx_);
 
+  return 0;
 }
 
 int GroupManager::transferOwner() { // 转移群主
   std::lock_guard<std::mutex> lock(mtx_);
 
+  return 0;
 }
 // 成员管理
 int GroupManager::joinRequest(int group_id,int apply_uid) {
@@ -652,11 +658,13 @@ int GroupManager::ifRemind(int group_id,int uid) {
 bool GroupManager::load(const std::string& path) {
   std::lock_guard<std::mutex> lock(mtx_);
 
+  return true;
 }
 
 bool GroupManager::save(const std::string& path) {
   std::lock_guard<std::mutex> lock(mtx_);
 
+  return true;
 }
 
 void SessionManager::unbindUser(int user_id) {
@@ -686,7 +694,6 @@ bool SessionManager::sendChatTo(int to_uid,const Message& msg) {
   if(msg.chat_type == "group") {
     push["action"] = "group_chat";
   }
-  // push["action"] = "private_chat";
   push["data"] = msg;
   if(sock->sendMsg(push.dump()) != NetResult::OK) {
     return -1;

@@ -98,8 +98,8 @@ private:
 class GroupManager {
 public:
   // int creatGroup(int owner_uid,std::string& name,int& out_gid);
-  int creatGroup(const User& owner,std::string& name,int& out_gid);
-  int delGroup(int group_id,int uid);
+  int createGroup(const User& owner,std::string& name,int& out_gid);
+  int disbandGroup(int group_id,int uid);
   int renameGroup(int group_id,int handler_id,std::string& new_name);
   int transferOwner(); // 转移群主
   // 成员管理

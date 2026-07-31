@@ -358,19 +358,19 @@ void Session::groupServer(nlohmann::json j) {
   if(j["action"] == "create") {
     std::string name = j["data"]["group_name"];
     int gid;
-    int sta = groupManager.creatGroup(*(usrManager.getUser(self_uid)),name,gid);
+    int sta = groupManager.createGroup(*(usrManager.getUser(self_uid)),name,gid);
     if(sta == 0) {
       GroupInfo info = groupManager.getGroupInfo(gid);
       reply["data"]["group_id"] = gid;
       reply["data"]["name"] = info.name;
       reply["data"]["owner_uid"] = info.owner_uid;
-      reply["data"]["creat_time"] = info.creat_time;
+      reply["data"]["create_time"] = info.create_time;
     }
     returnReply(j,sta,reply);
   }
-  if(j["action"] == "del") {
+  if(j["action"] == "disband") {
     int gid = j["data"]["group_id"];
-    int sta = groupManager.delGroup(gid,self_uid);
+    int sta = groupManager.disbandGroup(gid,self_uid);
     returnReply(j,sta,reply);
   }
   if(j["action"] == "join_request") {
@@ -401,6 +401,7 @@ void Session::groupServer(nlohmann::json j) {
     int target_uid = j["data"]["target_uid"];
     bool admin = j["data"]["is_admin"];
     int sta = groupManager.setAdmin(gid,self_uid,target_uid,admin);
+    if(sta == 0) reply["data"] = j["data"];
     returnReply(j,sta,reply);
   }
   if(j["action"] == "set_remind") {
@@ -419,7 +420,7 @@ void Session::groupServer(nlohmann::json j) {
           {"group_id",info.group_id},
           {"group_name",info.name},
           {"owner_uid",info.owner_uid},
-          {"create_time",info.creat_time}
+          {"create_time",info.create_time}
         });
       }
     }
