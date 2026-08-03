@@ -193,6 +193,19 @@ void Session::friendSever(nlohmann::json j) {
   } else if(j["action"] == "del") {
     int to_uid = j["data"]["to_uid"];
     friendManager.del(self_uid,to_uid);
+    if(sessionManager.isOnline(to_uid)) {
+      nlohmann::json push;
+      User* usr = usrManager.getUser(self_uid);
+      push["msg_type"] = "push";
+      push["type"] = "friend";
+      push["action"] = "del";
+      push["time"] = now_ms();
+      push["data"] = {
+        {"username",usr->username},
+        {"uid",usr->uid}
+      };
+      sessionManager.sendPushTo(to_uid,push);
+    }
     returnReply(j,0,reply);
   } else if(j["action"] == "agree") {
     int to_uid = j["data"]["to_uid"];
@@ -371,29 +384,140 @@ void Session::groupServer(nlohmann::json j) {
   if(j["action"] == "disband") {
     int gid = j["data"]["group_id"];
     int sta = groupManager.disbandGroup(gid,self_uid);
+    if(sta == 0) {
+      GroupInfo g = groupManager.getGroupInfo(gid);
+      auto members = groupManager.getMembers(gid);
+      for(auto& m : members) {
+        nlohmann::json push;
+        push["msg_type"] = "push";
+        push["type"] = "group";
+        push["action"] = "member_update";
+        push["data"] = {
+          {"group_id",gid},
+          {"group_name",g.name},
+          {"reason","disbanded"}
+        };
+        sessionManager.sendPushTo(m.uid, push);
+      }
+    }
     returnReply(j,sta,reply);
   }
   if(j["action"] == "join_request") {
     int gid = j["data"]["group_id"];
     int sta = groupManager.joinRequest(gid,self_uid);
+    if(sta == 0) {
+      auto members = groupManager.getMembers(gid);
+      User* apply = usrManager.getUser(self_uid);
+      GroupInfo info = groupManager.getGroupInfo(gid);
+      nlohmann::json push;
+      push["msg_type"] = "push";
+      push["type"] = "group";
+      push["action"] = "join_request";
+      push["data"] = {
+        {"group_id",gid},
+        {"group_name",info.name},
+        {"apply_uid",self_uid},
+        {"apply_name",apply->username}
+      };
+      for(auto& m : members) {
+        if(m.permission <= 1 && m.uid != self_uid) {
+          sessionManager.sendPushTo(m.uid,push);
+        }
+      }
+    }
     returnReply(j,sta,reply);
   }
   if(j["action"] == "handle_request") {
     int gid = j["data"]["group_id"];
     int target_uid = j["data"]["target_uid"];
     bool approval = j["data"]["approval"];
-    int sta = groupManager.handleRequest(gid,self_uid,*(usrManager.getUser(target_uid)),approval);
+    User* target_user = usrManager.getUser(target_uid);
+    int sta = groupManager.handleRequest(gid,self_uid,*target_user,approval);
+    if(sta == 0) {
+      nlohmann::json push;
+      push["msg_type"] = "push";
+      push["type"] = "group";
+      push["action"] = "join_result";
+      GroupInfo g = groupManager.getGroupInfo(gid);
+      push["data"] = {
+        {"group_id",gid},
+        {"approval",approval},
+        {"group_name",g.name}
+      };
+      if(approval) {
+        push["data"]["create_time"] = g.create_time;
+        push["data"]["owner_uid"] = g.owner_uid;
+        nlohmann::json update_push;
+        update_push["msg_type"] = "push";
+        update_push["type"] = "group";
+        update_push["action"] = "member_update";
+        update_push["data"] = {
+          {"group_id",gid},
+          {"update_type","join"},
+          {"member_uid",target_uid},
+          {"member_name",target_user->username}
+        };
+        auto members = groupManager.getMembers(gid);
+        for(auto& m : members) {
+          if(m.uid != target_uid && sessionManager.isOnline(m.uid)) sessionManager.sendPushTo(m.uid,update_push);
+        }
+      }
+      sessionManager.sendPushTo(target_uid,push);
+    }
     returnReply(j,sta,reply);
   }
   if(j["action"] == "leave") {
     int gid = j["data"]["group_id"];
     int sta = groupManager.leaveGroup(gid,self_uid);
+    if(sta == 0) {
+      nlohmann::json update_push;
+      update_push["msg_type"] = "push";
+      update_push["type"] = "group";
+      update_push["action"] = "member_update";
+      update_push["data"] = {
+        {"group_id",gid},
+        {"update_type","leave"},
+        {"member_uid",self_uid},
+        {"member_name",usrManager.getUser(self_uid)->username}
+      };
+      auto members = groupManager.getMembers(gid);
+      for(auto& m : members) {
+        if(m.uid != self_uid && sessionManager.isOnline(m.uid)) sessionManager.sendPushTo(m.uid,update_push);
+      }
+    }
     returnReply(j,sta,reply);
   }
   if(j["action"] == "kick") {
     int gid = j["data"]["group_id"];
     int target_uid = j["data"]["target_uid"];
+    User* target_user = usrManager.getUser(target_uid);
     int sta = groupManager.kickMember(gid,self_uid,target_uid);
+    if(sta == 0) {
+      nlohmann::json push;
+      push["msg_type"] = "push";
+      push["type"] = "group";
+      push["action"] = "kicked";
+      push["data"] = {
+        {"group_id",gid},
+        {"group_name",groupManager.getGroupInfo(gid).name}
+      };
+      sessionManager.sendPushTo(target_uid, push);
+    
+      nlohmann::json update_push;
+      update_push["msg_type"] = "push";
+      update_push["type"] = "group";
+      update_push["action"] = "member_update";
+      update_push["data"] = {
+        {"group_id",gid},
+        {"update_type","kick"},
+        {"member_uid",target_uid},
+        {"member_name",usrManager.getUser(target_uid)->username}
+      };
+      auto members = groupManager.getMembers(gid);
+      for(auto& m : members) {
+        if(m.uid != target_uid && sessionManager.isOnline(m.uid)) sessionManager.sendPushTo(m.uid,update_push);
+      }
+    }
     returnReply(j,sta,reply);
   }
   if(j["action"] == "set_admin") {
@@ -401,7 +525,39 @@ void Session::groupServer(nlohmann::json j) {
     int target_uid = j["data"]["target_uid"];
     bool admin = j["data"]["is_admin"];
     int sta = groupManager.setAdmin(gid,self_uid,target_uid,admin);
-    if(sta == 0) reply["data"] = j["data"];
+    if(sta == 0) {
+      reply["data"] = j["data"];
+      nlohmann::json push;
+      push["msg_type"] = "push";
+      push["type"] = "group";
+      push["action"] = "permission_changed";
+      push["data"]["group_id"] = gid;
+      int perm;
+      if(admin) {
+        perm = 1;
+        push["data"]["new_permission"] = 1;
+      } else {
+        perm = 2;
+        push["data"]["new_permission"] = 2;
+      }
+      sessionManager.sendPushTo(target_uid, push);
+
+      nlohmann::json update_push;
+      update_push["msg_type"] = "push";
+      update_push["type"] = "group";
+      update_push["action"] = "member_update";
+      update_push["data"] = {
+        {"group_id",gid},
+        {"update_type","set_admin"},
+        {"member_uid",target_uid},
+        {"member_name",usrManager.getUser(target_uid)->username},
+        {"new_permission",perm}
+      };
+      auto members = groupManager.getMembers(gid);
+      for(auto& m : members) {
+        if(m.uid != target_uid && sessionManager.isOnline(m.uid)) sessionManager.sendPushTo(m.uid,update_push);
+      }
+    }  
     returnReply(j,sta,reply);
   }
   if(j["action"] == "set_remind") {

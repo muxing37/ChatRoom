@@ -406,10 +406,6 @@ bool MessageManager::save(const std::string& path) {
   for(const auto& [key, msgs] : history_) {
     j["history"][key] = msgs;
   }
-  // // 保存离线消息
-  // for(const auto& [uid, msgs] : offline_msg_) {
-  //   j["offline"][std::to_string(uid)] = msgs;
-  // }
   // 保存计数器
   j["count"] = count.load();
   std::ofstream ofs(path);
@@ -436,12 +432,6 @@ bool MessageManager::load(const std::string& path) {
       history_[key] = value.get<std::vector<Message>>();
     }
   }
-  // 恢复离线消息
-  // if(j.contains("offline")) {
-  //   for (auto& [uid, value] : j["offline"].items()) {
-  //     offline_msg_[std::stoi(uid)] = value.get<std::vector<Message>>();
-  //   }
-  // }
   // 恢复计数器
   if(j.contains("count")) {
     count.store(j["count"].get<uint64_t>());
@@ -704,6 +694,7 @@ bool SessionManager::sendChatTo(int to_uid,const Message& msg) {
 bool SessionManager::sendPushTo(int to_uid,nlohmann::json& push) {
   auto sock = getSock(to_uid);
   if(!sock) return -1;
+  push["msg_type"] = "push";
   if(sock->sendMsg(push.dump()) != NetResult::OK) {
     return -1;
   }

@@ -137,6 +137,13 @@ private:
   std::mutex mtx_;
 };
 
+class FileManager {
+public:
+
+private:
+  std::mutex mtx_;
+};
+
 class SessionManager {
 public:
   void bindUser(int user_id,std::shared_ptr<TcpSocket> sock);
