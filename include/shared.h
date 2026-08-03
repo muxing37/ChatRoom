@@ -30,14 +30,14 @@ struct GroupInfo {
 inline void to_json(nlohmann::json& j,const GroupInfo& g) {
     j = {
         {"group_id",g.group_id},
-        {"name",g.name},
+        {"group_name",g.name},
         {"owner_uid",g.owner_uid},
         {"create_time",g.create_time}
     };
 }
 inline void from_json(const nlohmann::json& j,GroupInfo& g) {
     j.at("group_id").get_to(g.group_id);
-    j.at("name").get_to(g.name);
+    j.at("group_name").get_to(g.name);
     j.at("owner_uid").get_to(g.owner_uid);
     j.at("create_time").get_to(g.create_time);
 }

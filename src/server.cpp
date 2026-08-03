@@ -447,6 +447,12 @@ void Session::groupServer(nlohmann::json j) {
       if(approval) {
         push["data"]["create_time"] = g.create_time;
         push["data"]["owner_uid"] = g.owner_uid;
+        auto members = groupManager.getMembers(gid);
+        nlohmann::json res = nlohmann::json::array();
+        for(auto& m : members) {
+          res.push_back(m);
+        }
+        push["data"]["members"] = res;
         nlohmann::json update_push;
         update_push["msg_type"] = "push";
         update_push["type"] = "group";
