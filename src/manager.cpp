@@ -189,7 +189,7 @@ int FriendManager::del(int uid1,int uid2) {
 int FriendManager::request(int from_uid,int to_uid) {
   if(from_uid == to_uid) return 1; //不可添加自己为好友
   std::lock_guard<std::mutex> lock(mtx_);
-  if(FriendManager::isFriend(from_uid,to_uid)) return 2; //已经是好友
+  if(FriendManager::isFriend_(from_uid,to_uid)) return 2; //已经是好友
   if(requests_[to_uid].count(from_uid)) {
     return 3; //已发送过申请
   }
@@ -220,7 +220,15 @@ int FriendManager::reject(int uid1,int uid2) {
 }
 
 bool FriendManager::isFriend(int uid1,int uid2) {
-  // std::lock_guard<std::mutex> lock(mtx_);
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = friends_.find(uid1);
+  if(it == friends_.end()) {
+    return false;
+  }
+  return it->second.count(uid2) > 0;
+}
+
+bool FriendManager::isFriend_(int uid1,int uid2) {
   auto it = friends_.find(uid1);
   if(it == friends_.end()) {
     return false;
@@ -236,7 +244,7 @@ bool FriendManager::removeUsr(int uid) {
 // 好友屏蔽/拉黑相关
 int FriendManager::block(int uid,int target) {
   std::lock_guard lock(mtx_);
-  if(!isFriend(uid,target)) return -1;   // 只能屏蔽好友
+  if(!isFriend_(uid,target)) return -1;   // 只能屏蔽好友
   block_[uid].insert(target);
   save(FRIENDDATA);
   return 0;
@@ -339,7 +347,13 @@ bool FriendManager::save(const std::string& path) {
 // 消息管理相关
 int MessageManager::add(const Message& msg) {
   std::lock_guard lock(mtx_);
-  std::string cvs_id = privateId(msg.from_uid,msg.target_id);
+  std::string cvs_id;
+  //  = privateId(msg.from_uid,msg.target_id);
+  if(msg.chat_type == "group") {
+    cvs_id = groupId(msg.target_id);
+  } else {
+    cvs_id = privateId(msg.from_uid,msg.target_id);
+  }
   history_[cvs_id].push_back(msg);
   save(PCHATDATA);
   return 0;
@@ -656,6 +670,8 @@ bool GroupManager::save(const std::string& path) {
 
   return true;
 }
+
+
 
 void SessionManager::unbindUser(int user_id) {
   std::lock_guard<std::mutex> lock(mtx_);

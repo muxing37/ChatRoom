@@ -9,6 +9,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <unordered_set>
 #include <memory>
 
@@ -69,6 +70,9 @@ public:
   std::vector<int> getBlockList(int uid);
 
 private:
+  bool isFriend_(int uid1,int uid2);
+
+private:
   std::unordered_map<int,std::unordered_set<int>> friends_;
   std::unordered_map<int,std::unordered_set<int>> requests_;
   std::unordered_map<int,std::unordered_set<int>> block_;
@@ -82,6 +86,7 @@ public:
   std::vector<Message> getMessagesByTime(int uid,uint64_t time); //获取某个时间后的所有消息，可用于离线消息的同步
   std::vector<Message> getAllMsg(int uid); //获取所有消息
   std::vector<Message> getHistory(int uid1,int uid2);
+  std::vector<Message> getGroupMessages(int gid,uint64_t after_time);
   std::string getMsgId();
 
   bool removeUsr(int uid);
@@ -139,9 +144,25 @@ private:
 
 class FileManager {
 public:
+  FileManager(const std::string& meta_path = "./data/filemeta.json",const std::string& storage_dir = "./data/files/");
+
+  bool init();
+  bool addFileMeta(const FileMeta& meta);
+  std::optional<FileMeta> getFileMeta(const std::string& file_id);
+  std::string generateFileId();
+  std::string getFullPath(const std::string& storage_path);
+  std::vector<FileMeta> getAllMeta();
 
 private:
-  std::mutex mtx_;
+  bool loadMeta();
+  bool saveMeta();
+
+private:
+  std::string meta_path_;
+  std::string storage_dir_; // 文件存储根目录
+  std::unordered_map<std::string,FileMeta> metas_; // file_id -> FileMeta
+  mutable std::mutex mtx_;
+  std::atomic<uint64_t> id_counter_{0};
 };
 
 class SessionManager {

@@ -245,8 +245,8 @@ void Session::friendSever(nlohmann::json j) {
     auto list = friendManager.list_friend(self_uid);
     for(int uid : list) {
       User *u = usrManager.getUser(uid);
-      u->online = sessionManager.isOnline(u->uid);
       if(!u) continue;
+      u->online = sessionManager.isOnline(u->uid);
       reply["data"]["friends"].push_back({
         {"uid",u->uid},
         {"username",u->username},
@@ -287,13 +287,19 @@ void Session::friendSever(nlohmann::json j) {
 void Session::chatServer(nlohmann::json j) {
   if(j["action"] == "private_chat") {
     auto msg = j["data"].get<Message>();
+    if(!friendManager.isFriend(msg.from_uid, msg.target_id)) {
+      nlohmann::json reply;
+      reply["error"] = "not friends";
+      returnReply(j,-1,reply);
+      return;
+    }
     if(friendManager.isBlocked(msg.target_id,msg.from_uid)) {
       nlohmann::json reply;
       reply["error"] = "blocked by receiver";
       returnReply(j,-1,reply);
       return;
     }
-    j["data"]["message_id"] = messageManager.getMsgId();
+    msg.message_id = messageManager.getMsgId();
     msg.time = now_ms();
     if(sessionManager.isOnline(msg.target_id)) {
       sessionManager.sendChatTo(msg.target_id,msg);
@@ -307,7 +313,7 @@ void Session::chatServer(nlohmann::json j) {
     reply["data"] = msg;
     returnReply(j,0,reply);
   }
-  if(j["action"] = "group_chat") {
+  if(j["action"] == "group_chat") {
     auto msg = j["data"].get<Message>();
     msg.chat_type = "group";
     msg.time = now_ms();

@@ -58,8 +58,8 @@ int start_client() {
   ClientNetwork network(sock);
   AuthService authService(network,ctx);
   FriendService friendService(network,ctx);
-  PrivateChatService pcService(network,ctx);
-  CliUI menu(authService,friendService,pcService,ctx);
+  ChatService chatService(network,ctx);
+  CliUI menu(authService,friendService,chatService,ctx);
 
   network.start();
 

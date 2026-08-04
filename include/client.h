@@ -5,8 +5,6 @@
 #include <fstream>
 #include <string>
 #include <signal.h>
-#include <readline/readline.h>
-#include <readline/history.h>
 #include <queue>
 #include <mutex>
 #include <condition_variable>

@@ -47,7 +47,22 @@ public:
   bool isMessageRepeat(const std::string& msg_id);
   void markMessageReceived(const std::string& msg_id);
   // 群组相关
-
+    // 群组列表
+  void setGroupList(const std::vector<GroupInfo>& list);
+  std::vector<GroupInfo> getGroupList();
+  void addGroup(const GroupInfo& g);
+  void removeGroup(int gid);
+    // 群成员
+  void setGroupMembers(int gid,const std::vector<GroupMember>& members);
+  std::vector<GroupMember> getGroupAllMembers(int gid);
+  void addGroupMember(int gid,const GroupMember& m);
+  void removeGroupMember(int gid,int uid);
+  std::optional<GroupMember> getGroupMember(int gid,int uid);
+    // 本人在群内的信息
+  void setSelfPermission(int gid,int perm);
+  int getSelfPermission(int gid);
+  void setSelfRemind(int gid,int remind);
+  int getSelfRemind(int gid);
   // 本地信息存储相关
   std::unordered_map<int,std::vector<Message>> getAllMessages() const;
   void loadMessages(const std::unordered_map<int,std::vector<Message>>& allMsgs);
@@ -64,7 +79,11 @@ private:
   uint64_t last_sync_time_ = 0;
   std::unordered_set<std::string> known_msg_;
   // 群组相关
-
+  std::unordered_map<int,GroupInfo> groupMap_; // gid -> 信息
+  std::vector<int> groupSort_; // gid排序
+  std::unordered_map<int,std::vector<GroupMember>> groupMembers_; // gid -> 成员列表
+  std::unordered_map<int,int> usrPermission_; // gid -> 用户的权限
+  std::unordered_map<int,int> usrRemind_; // gid -> 用户的提醒设置
 
   mutable std::mutex mtx_;
 };
@@ -138,18 +157,21 @@ public:
   int unblock(int uid); //解除屏蔽
   int getBlockList(); //获取屏蔽的好友列表
 
+  void handlePush(const nlohmann::json& push);
+
 private:
   ClientNetwork& network_;
   ClientContext& ctx_;
 };
 
-class PrivateChatService {
+class ChatService {
 public:
-  PrivateChatService(ClientNetwork& network,ClientContext& ctx);
+  ChatService(ClientNetwork& network,ClientContext& ctx);
   int sendPrivateMessage(int to_uid,const std::string& text); //发送私聊消息
+  int sendGroupMessage(int gid,const std::string& text); //发送群聊消息
   int syncHistory(); //从服务端同步聊天记录
   std::vector<Message> getMessages(int uid); //从本地ctx获取聊天记录
-  void gotPush(const nlohmann::json& push);
+  void handlePush(const nlohmann::json& push);
 
 private:
   ClientNetwork& network_;
@@ -159,6 +181,30 @@ private:
 class GroupService {
 public:
   GroupService(ClientNetwork& network,ClientContext& ctx);
+  int createGroup(const std::string& name,int& out_gid);
+  int disbandGroup(int gid);
+  // 成员管理
+  int requestJoin(int gid);
+  int handleJoinRequest(int gid,int target_uid,bool approval);
+  int leaveGroup(int gid);
+  int kickMember(int gid,int target_uid);
+  int setAdmin(int gid,int target_uid,bool admin);
+  int setRemind(int gid,int remind);
+  // 查询与同步
+  int listMyGroups(); // 获取我加入的群列表，更新 ctx
+  int listMembers(int gid); // 获取某群成员，更新 ctx
+  int listJoinRequests(int gid,std::vector<User>& out_requests); // 获取某群申请列表
+
+  void handlePush(const nlohmann::json& push);
+
+private:
+  ClientNetwork& network_;
+  ClientContext& ctx_;
+};
+
+class FileService {
+public:
+  FileService(ClientNetwork& network,ClientContext& ctx);
 
 private:
   ClientNetwork& network_;

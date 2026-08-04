@@ -53,6 +53,7 @@ struct GroupMember {
 inline void to_json(nlohmann::json& j,const GroupMember& m) {
     j = {
         {"uid",m.uid},
+        {"usr_name",m.usr_name},
         {"permission",m.permission},
         {"join_time",m.join_time},
         {"remind",m.remind}
@@ -60,6 +61,7 @@ inline void to_json(nlohmann::json& j,const GroupMember& m) {
 }
 inline void from_json(const nlohmann::json& j,GroupMember& m) {
     j.at("uid").get_to(m.uid);
+    j.at("usr_name").get_to(m.usr_name);
     j.at("permission").get_to(m.permission);
     j.at("join_time").get_to(m.join_time);
     j.at("remind").get_to(m.remind);
@@ -82,7 +84,7 @@ struct Message {
     std::string content;
     uint64_t time;
 
-    int status;  // 0:待发送(接收方离线) 1:已送达
+    int status;  // 0:待发送(接收方离线) 1:已送达  （已弃用）
 };
 
 inline void to_json(nlohmann::json& j,const Message& msg) {
@@ -106,6 +108,42 @@ inline void from_json(const nlohmann::json& j,Message& msg) {
     j.at("content").get_to(msg.content);
     j.at("time").get_to(msg.time);
     j.at("status").get_to(msg.status);
+}
+
+struct FileMeta {
+    std::string file_id; // 唯一标识
+    std::string file_name; // 原始文件名
+    int64_t file_size; // 文件大小（字节）
+    int uploader_uid; // 上传者 uid
+    uint64_t upload_time; // 上传完成时间
+    std::string storage_path; // 相对于 data/files/ 的存储路径
+    std::string file_hash; // 文件哈希
+};
+
+// 序列化与反序列化
+inline void to_json(nlohmann::json& j, const FileMeta& f) {
+    j = nlohmann::json{
+        {"file_id",f.file_id},
+        {"file_name",f.file_name},
+        {"file_size",f.file_size},
+        {"uploader_uid",f.uploader_uid},
+        {"upload_time",f.upload_time},
+        {"storage_path",f.storage_path},
+        {"file_hash",f.file_hash}
+    };
+}
+
+inline void from_json(const nlohmann::json& j, FileMeta& f) {
+    j.at("file_id").get_to(f.file_id);
+    j.at("file_name").get_to(f.file_name);
+    j.at("file_size").get_to(f.file_size);
+    j.at("uploader_uid").get_to(f.uploader_uid);
+    j.at("upload_time").get_to(f.upload_time);
+    j.at("storage_path").get_to(f.storage_path);
+    if (j.contains("file_hash"))
+        j.at("file_hash").get_to(f.file_hash);
+    else
+        f.file_hash.clear();
 }
 
 inline uint64_t now_ms() {

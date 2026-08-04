@@ -3,7 +3,7 @@
 CliUI::CliUI(
   AuthService& authService,
   FriendService& friendService,
-  PrivateChatService& pcService,
+  ChatService& pcService,
   ClientContext& ctx
 ) : 
   authService_(authService),

@@ -12,7 +12,7 @@ public:
   CliUI(
     AuthService& authService,
     FriendService& friendService,
-    PrivateChatService& pcService,
+    ChatService& pcService,
     ClientContext& ctx
   );
   void run();
@@ -36,7 +36,7 @@ private:
 private:
   AuthService& authService_;
   FriendService& friendService_;
-  PrivateChatService& pcService_;
+  ChatService& pcService_;
   ClientContext& ctx_;
   bool running_=true;
 
