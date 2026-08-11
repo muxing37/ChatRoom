@@ -3,6 +3,6 @@ build/
 src/test.cpp
 src/test
 reruirements.txt
-web/
-include/webui.h
-src/webui.cpp
+client/web/
+client/include/webui.h
+client/src/webui.cpp

@@ -1,5 +1,5 @@
 #include "hash.h"
-#include <openssl/sha.h>
+#include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <fstream>
 #include <iomanip>
@@ -8,19 +8,31 @@
 std::string sha256File(const std::string& path) {
   std::ifstream ifs(path,std::ios::binary);
   if(!ifs.is_open()) return {};
-  SHA256_CTX ctx;
-  SHA256_Init(&ctx);
+  EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+  if(!ctx) return {};
+  if(EVP_DigestInit_ex(ctx,EVP_sha256(),nullptr) != 1) {
+    EVP_MD_CTX_free(ctx);
+    return {};
+  }
   char buf[1024 * 1024];
   while(ifs) {
     ifs.read(buf,sizeof(buf));
     std::streamsize n = ifs.gcount();
-    if(n > 0) SHA256_Update(&ctx,buf,static_cast<size_t>(n));
+    if(n > 0 && EVP_DigestUpdate(ctx,buf,static_cast<size_t>(n)) != 1) {
+      EVP_MD_CTX_free(ctx);
+      return {};
+    }
   }
-  unsigned char md[SHA256_DIGEST_LENGTH];
-  SHA256_Final(md,&ctx);
+  unsigned char md[EVP_MAX_MD_SIZE];
+  unsigned int mdlen = 0;
+  if(EVP_DigestFinal_ex(ctx,md,&mdlen) != 1) {
+    EVP_MD_CTX_free(ctx);
+    return {};
+  }
+  EVP_MD_CTX_free(ctx);
   std::ostringstream oss;
   oss << std::hex << std::setfill('0');
-  for(int i = 0;i < SHA256_DIGEST_LENGTH;i++) {
+  for(int i = 0;i < mdlen;i++) {
     oss << std::setw(2) << static_cast<unsigned int>(md[i]);
   }
   return oss.str();

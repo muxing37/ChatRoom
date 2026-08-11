@@ -3,29 +3,32 @@ project(ChatProject)
 
 set(CMAKE_CXX_STANDARD 17)
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
-include_directories(${PROJECT_SOURCE_DIR}/include/third)
+include_directories(${PROJECT_SOURCE_DIR}/common/include)
+include_directories(${PROJECT_SOURCE_DIR}/client/include)
+include_directories(${PROJECT_SOURCE_DIR}/server/include)
+include_directories(${PROJECT_SOURCE_DIR}/client/include/third)
+include_directories(${PROJECT_SOURCE_DIR}/server/include/third)
 
 # server
 add_executable(server
-    src/main_server.cpp
-    src/server.cpp
-    src/socket.cpp
-    src/manager.cpp
-    src/hash.cpp
-    src/imgmeta.cpp
+    server/src/main_server.cpp
+    server/src/server.cpp
+    server/src/imgmeta.cpp
+    server/src/manager.cpp
+    common/src/socket.cpp
+    common/src/hash.cpp
 )
 
 # client
 add_executable(client
-    src/main_client.cpp
-    src/client.cpp
-    src/socket.cpp
-    src/service.cpp
-    src/context.cpp
-    src/webui.cpp
-    src/cliui.cpp
-    src/hash.cpp
+    client/src/main_client.cpp
+    client/src/client.cpp
+    client/src/service.cpp
+    client/src/context.cpp
+    client/src/webui.cpp
+    client/src/cliui.cpp
+    common/src/socket.cpp
+    common/src/hash.cpp
 )
 
 find_package(PkgConfig REQUIRED)

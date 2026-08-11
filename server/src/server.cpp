@@ -100,7 +100,7 @@ static int createDataListener(unsigned short& out_port) {
 }
 
 static int acceptWithTimeout(int lfd,int timeout_ms) {
-  pollfd pfd{lfd, POLLIN, 0};
+  pollfd pfd{lfd,POLLIN,0};
   int r = poll(&pfd,1,timeout_ms);
   if(r <= 0) return -1;
   sockaddr_in cli;
@@ -142,11 +142,11 @@ std::unique_ptr<FileSession> FileSession::acceptAndAuth(int lfd,const std::strin
   }
   TcpSocket sock(cfd);
 
-  std::string hs;
-  if(sock.recvMsg(hs) != NetResult::OK) return nullptr;
+  std::string s;
+  if(sock.recvMsg(s) != NetResult::OK) return nullptr;
   nlohmann::json j;
   try {
-    j = nlohmann::json::parse(hs);
+    j = nlohmann::json::parse(s);
   } catch(...) {
     sock.sendMsg(R"({"status":-1})");
     return nullptr;
