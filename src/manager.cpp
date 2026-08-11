@@ -1,10 +1,20 @@
 #include "manager.h"
+#include "hash.h"
+#include <algorithm>
+#include <cstdio>
+#include <cerrno>
+#include <sstream>
+#include <iomanip>
+#include <filesystem>
 
 const std::string SAVEPATH = "./data";
 const std::string USRDATA = SAVEPATH + "/usrdata.json";
 const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
 const std::string PCHATDATA = SAVEPATH + "/pchatdata.json";
 const std::string GROUPDATA = SAVEPATH + "/groupdata.json";
+
+// 未完成上传的过期时间，超过该时长仍未完成的 .uploading 视为放弃，服务端重启时删除
+constexpr uint64_t UPLOAD_STALE_MS = 24ULL * 3600 * 1000; // 24 小时
 
 std::string privateId(int uid1, int uid2) {
   if(uid1 > uid2) std::swap(uid1, uid2);
@@ -14,8 +24,14 @@ std::string groupId(int groupId) {
   return "group_" + std::to_string(groupId);
 }
 // 用户管理相关
-bool UsrManager::verify(const std::string& username,const std::string& password) {
-
+bool UsrManager::verify(int uid,const std::string& password) {
+  auto uiter = uid_map.find(uid);
+  if(uiter == uid_map.end()) {
+    return false;
+  }
+  if(uiter->second.password_hash != passwordHash(password,uiter->second.salt)) {
+    return false;
+  }
   return true;
 }
 
@@ -26,12 +42,11 @@ bool UsrManager::regis(const std::string& username,const std::string& password,i
     return false;
   }
 
-  Account auth {
-    uid,
-    username,
-    password,
-    password
-  };
+  Account auth;
+  auth.uid = uid;
+  auth.username = username;
+  auth.salt = getSalt();
+  auth.password_hash = passwordHash(password,auth.salt);
 
   uid_map[uid] = auth;
   name_map[username] = uid;
@@ -48,20 +63,22 @@ bool UsrManager::login(const std::string& username,const std::string& password,i
   }
 
   int uid = iter->second;
-  auto uiter = uid_map.find(uid);
-  if(uiter == uid_map.end()) {
-    return false;
-  }
-
-  if(uiter->second.password != password) {
+  if(!verify(uid,password)) {
     return false;
   }
   out_uid = uid;
   return true;
 }
 
-bool UsrManager::delUsr(int uid) {
-
+bool UsrManager::delUsr(int uid,const std::string& password) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  if(!verify(uid,password)) {
+    return false;
+  }
+  auto it = uid_map.find(uid);
+  if(it == uid_map.end()) return false;
+  name_map.erase(it->second.username);
+  uid_map.erase(it);
   return true;
 }
 
@@ -81,8 +98,9 @@ bool UsrManager::load(const std::string& path) {
 
     auth.uid = item["uid"];
     auth.username = item["username"];
-    auth.password = item["password"];
-    // auth.password_hash = item["password_hash"];
+    // auth.password = item["password"];
+    auth.password_hash = item["password_hash"];
+    auth.salt = item["salt"];
 
     uid_map[auth.uid] = auth;
     name_map[auth.username] = auth.uid;
@@ -98,8 +116,8 @@ bool UsrManager::save(const std::string& path) {
     j.push_back({
       {"uid",auth.uid},
       {"username",auth.username},
-      {"password",auth.password},
-      {"password_hash",auth.password}
+      {"salt",auth.salt},
+      {"password_hash",auth.password_hash}
     });
   }
 
@@ -130,17 +148,17 @@ bool UsrManager::isExist(const std::string& username) {
   return false;
 }
 
-User* UsrManager::getUser(int uid) {
+std::optional<User> UsrManager::getUser(int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
 
   auto iter = uid_map.find(uid);
   if(iter == uid_map.end()) {
-    return nullptr;
+    return std::nullopt;
   }
-  User *usr = new User;
-  usr->uid = iter->second.uid;
-  usr->username = iter->second.username;
-  usr->online = false;
+  User usr;
+  usr.uid = iter->second.uid;
+  usr.username = iter->second.username;
+  usr.online = false;
   return usr;
 }
 
@@ -237,14 +255,24 @@ bool FriendManager::isFriend_(int uid1,int uid2) {
 }
 
 bool FriendManager::removeUsr(int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
 
+  friends_.erase(uid);
+  requests_.erase(uid);
+  block_.erase(uid);
+
+  for(auto& [u,set] : friends_) set.erase(uid);
+  for(auto& [u,set] : requests_) set.erase(uid);
+  for(auto& [u,set] : block_) set.erase(uid);
+
+  save(FRIENDDATA);
   return true;
 }
 
 // 好友屏蔽/拉黑相关
 int FriendManager::block(int uid,int target) {
   std::lock_guard lock(mtx_);
-  if(!isFriend_(uid,target)) return -1;   // 只能屏蔽好友
+  if(!isFriend_(uid,target)) return -1; // 只能屏蔽好友
   block_[uid].insert(target);
   save(FRIENDDATA);
   return 0;
@@ -348,7 +376,6 @@ bool FriendManager::save(const std::string& path) {
 int MessageManager::add(const Message& msg) {
   std::lock_guard lock(mtx_);
   std::string cvs_id;
-  //  = privateId(msg.from_uid,msg.target_id);
   if(msg.chat_type == "group") {
     cvs_id = groupId(msg.target_id);
   } else {
@@ -363,9 +390,14 @@ std::vector<Message> MessageManager::getMessagesByTime(int uid,uint64_t time) {
   std::lock_guard<std::mutex> lock(mtx_);
   std::vector<Message> result;
   for(auto& [key, msgs] : history_) {
+    bool group_key = (key.rfind("group_",0) == 0);
     for(auto& msg : msgs) {
-      if((msg.from_uid == uid || msg.target_id == uid) && msg.time > time) {
-        result.push_back(msg);
+      if(group_key) {
+        if(msg.time > time) result.push_back(msg);
+      } else {
+        if((msg.from_uid == uid || msg.target_id == uid) && msg.time > time) {
+          result.push_back(msg);
+        }
       }
     }
   }
@@ -387,8 +419,9 @@ std::vector<Message> MessageManager::getAllMsg(int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
   std::vector<Message> result;
   for(const auto& [key,msgs] : history_) {
+    bool group_key = (key.rfind("group_",0) == 0);
     for(const auto& msg : msgs) {
-      if(msg.from_uid == uid || msg.target_id == uid) {
+      if(group_key || msg.from_uid == uid || msg.target_id == uid) {
         result.push_back(msg);
       }
     }
@@ -409,7 +442,19 @@ std::string MessageManager::getMsgId() {
 }
 
 bool MessageManager::removeUsr(int uid) {
-
+  std::lock_guard<std::mutex> lock(mtx_);
+  for(auto it = history_.begin(); it != history_.end(); ) {
+    auto& msgs = it->second;
+    bool group_key = (it->first.rfind("group_",0) == 0);
+    msgs.erase(std::remove_if(msgs.begin(), msgs.end(),
+      [uid,group_key](const Message& m) {
+        // if(group_key) return m.from_uid == uid;
+        return m.from_uid == uid || m.target_id == uid;
+      }), msgs.end());
+    if(msgs.empty()) it = history_.erase(it);
+    else it++;
+  }
+  save(PCHATDATA);
   return true;
 }
 
@@ -559,6 +604,27 @@ int GroupManager::kickMember(int group_id,int handler_uid,int target_id) {
   save(GROUPDATA);
   return 0;
 }
+
+int GroupManager::removeUser(int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::vector<int> owned;
+  for(auto& [gid,info] : groups_) {
+    if(info.owner_uid == uid) owned.push_back(gid);
+  }
+  for(int gid : owned) {
+    groups_.erase(gid);
+    members_.erase(gid);
+    join_requests_.erase(gid);
+  }
+  for(auto& [gid,memMap] : members_) {
+    memMap.erase(uid);
+  }
+  for(auto& [gid,reqs] : join_requests_) {
+    reqs.erase(uid);
+  }
+  save(GROUPDATA);
+  return 0;
+}
 // 管理员设置
 int GroupManager::setAdmin(int group_id,int handler_uid,int target_id,bool admin) {
   std::lock_guard<std::mutex> lock(mtx_);
@@ -661,17 +727,81 @@ int GroupManager::ifRemind(int group_id,int uid) {
 
 bool GroupManager::load(const std::string& path) {
   std::lock_guard<std::mutex> lock(mtx_);
+  std::ifstream ifs(path);
+  if(!ifs.is_open()) return false;
+  nlohmann::json j;
+  try {
+    ifs >> j;
+  } catch(...) {
+    return false;
+  }
+  groups_.clear();
+  members_.clear();
+  join_requests_.clear();
 
+  if(j.contains("groups")) {
+    for(auto& item : j["groups"]) {
+      GroupInfo info;
+      from_json(item, info);
+      groups_[info.group_id] = info;
+    }
+  }
+  if(j.contains("members")) {
+    for(auto& [gid_s, arr] : j["members"].items()) {
+      int gid = std::stoi(gid_s);
+      for(auto& item : arr) {
+        GroupMember m;
+        from_json(item, m);
+        members_[gid][m.uid] = m;
+      }
+    }
+  }
+  if(j.contains("join_requests")) {
+    for(auto& [gid_s, arr] : j["join_requests"].items()) {
+      int gid = std::stoi(gid_s);
+      for(auto& x : arr) {
+        join_requests_[gid].insert(x.get<int>());
+      }
+    }
+  }
+  if(j.contains("next_group_id")) {
+    next_group_id_.store(j["next_group_id"].get<int>());
+  } else {
+    int max_gid = 100000;
+    for(auto& [gid, info] : groups_) if(gid > max_gid) max_gid = gid;
+    next_group_id_.store(max_gid + 1);
+  }
   return true;
 }
 
 bool GroupManager::save(const std::string& path) {
-  std::lock_guard<std::mutex> lock(mtx_);
-
+  nlohmann::json j;
+  j["groups"] = nlohmann::json::array();
+  for(auto& [gid, info] : groups_) {
+    nlohmann::json item;
+    to_json(item, info);
+    j["groups"].push_back(item);
+  }
+  for(auto& [gid, memMap] : members_) {
+    nlohmann::json arr = nlohmann::json::array();
+    for(auto& [uid, m] : memMap) {
+      nlohmann::json item;
+      to_json(item, m);
+      arr.push_back(item);
+    }
+    j["members"][std::to_string(gid)] = arr;
+  }
+  for(auto& [gid, reqs] : join_requests_) {
+    nlohmann::json arr = nlohmann::json::array();
+    for(int uid : reqs) arr.push_back(uid);
+    j["join_requests"][std::to_string(gid)] = arr;
+  }
+  j["next_group_id"] = next_group_id_.load();
+  std::ofstream ofs(path);
+  if(!ofs.is_open()) return false;
+  ofs << std::setw(4) << j;
   return true;
 }
-
-
 
 void SessionManager::unbindUser(int user_id) {
   std::lock_guard<std::mutex> lock(mtx_);
@@ -722,4 +852,224 @@ std::shared_ptr<TcpSocket> SessionManager::getSock(int user_id) {
   auto it = user_to_sock_.find(user_id);
   if(it == user_to_sock_.end()) return nullptr;
   return it->second;
+}
+
+FileManager::FileManager(const std::string& meta_path,const std::string& storage_dir)
+  : meta_path_(meta_path), storage_dir_(storage_dir) {
+  if(storage_dir_.empty() || storage_dir_.back() != '/') {
+    storage_dir_.push_back('/');
+  }
+}
+
+bool FileManager::init() {
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::error_code ec;
+  std::filesystem::create_directories(storage_dir_,ec);
+  std::filesystem::create_directories(storage_dir_ + "tmp",ec);
+  loadMeta();
+  cleanupOrphans();
+  return true;
+}
+
+std::string FileManager::generateFileId() {
+  uint64_t ms = now_ms();
+  uint64_t n = id_counter_.fetch_add(1);
+  std::ostringstream oss;
+  oss << std::hex << ms << std::setw(4) << std::setfill('0') << n;
+  return oss.str();
+}
+
+std::string FileManager::makeStoragePath(const std::string& file_id) {
+  std::string p1 = file_id.substr(0,2);
+  std::string p2 = file_id.substr(2,2);
+  return p1 + "/" + p2 + "/" + file_id;
+}
+
+std::string FileManager::getFullPath(const std::string& storage_path) {
+  return storage_dir_ + storage_path;
+}
+
+std::string FileManager::getPartPath(const std::string& file_id) {
+  return storage_dir_ + "tmp/" + file_id + ".uploading";
+}
+
+bool FileManager::addFileMeta(const FileMeta& meta) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  if(metas_.count(meta.file_id)) return false;
+  metas_[meta.file_id] = meta;
+  return saveMeta();
+}
+
+bool FileManager::updateFileMeta(const FileMeta& meta) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = metas_.find(meta.file_id);
+  if(it == metas_.end()) return false;
+  it->second = meta;
+  saveMeta();
+  return true;
+}
+
+std::optional<FileMeta> FileManager::getFileMeta(const std::string& file_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = metas_.find(file_id);
+  if(it == metas_.end()) return std::nullopt;
+  return it->second;
+}
+
+std::optional<FileMeta> FileManager::findIncomplete(const std::string& hash,int uid,const std::string& chat_type,int target_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  if(hash.empty()) return std::nullopt;
+  for(auto& [id,m] : metas_) {
+    if(m.status == 0 && m.uploader_uid == uid && m.file_hash == hash && m.chat_type == chat_type && m.target_id == target_id) {
+      return m;
+    }
+  }
+  return std::nullopt;
+}
+
+std::vector<FileMeta> FileManager::getAllMeta() {
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::vector<FileMeta> res;
+  res.reserve(metas_.size());
+  for(auto& [id,m] : metas_) res.push_back(m);
+  return res;
+}
+
+bool FileManager::createPart(const std::string& file_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::error_code ec;
+  std::filesystem::create_directories(storage_dir_ + "tmp",ec);
+  std::string path = getPartPath(file_id);
+  int fd = open(path.c_str(),O_WRONLY | O_CREAT,0644);
+  if(fd < 0) return false;
+  close(fd);
+  return true;
+}
+
+bool FileManager::writePart(const std::string& file_id,uint64_t offset,const char* data,size_t len) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = metas_.find(file_id);
+  if(it == metas_.end()) return false;
+  std::string path = getPartPath(file_id);
+  int fd = open(path.c_str(),O_WRONLY);
+  if(fd < 0) return false;
+  if(lseek(fd,(off_t)offset,SEEK_SET) == (off_t)-1) {
+    close(fd);
+    return false;
+  }
+  size_t total = 0;
+  while(total < len) {
+    ssize_t n = write(fd,data+total,len-total);
+    if(n < 0) {
+      if(errno == EINTR) continue;
+      close(fd);
+      return false;
+    }
+    total += (size_t)n;
+  }
+  close(fd);
+  it->second.received = offset + len;
+  return true;
+}
+
+uint64_t FileManager::getPartSize(const std::string& file_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = metas_.find(file_id);
+  if(it == metas_.end()) return 0;
+  return it->second.received;
+}
+
+bool FileManager::finishUpload(const std::string& file_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = metas_.find(file_id);
+  if(it == metas_.end()) return false;
+  FileMeta& meta = it->second;
+  if(meta.status != 0) return false; // 已完成或未知状态
+  if(meta.received != (uint64_t)meta.file_size) return false; // 未传完
+
+  std::string part = getPartPath(file_id);
+  std::string final = meta.storage_path;
+  auto pos = final.find_last_of('/');
+  std::string parent;
+  if(pos == std::string::npos) {
+    parent = storage_dir_;
+  } else {
+    parent = storage_dir_ + final.substr(0,pos);
+  }
+  std::error_code ec;
+  std::filesystem::create_directories(parent,ec);
+
+  std::string final_path = getFullPath(final);
+  if(std::rename(part.c_str(),final_path.c_str()) != 0) return false;
+
+  meta.status = 1;
+  return saveMeta();
+}
+
+bool FileManager::removePart(const std::string& file_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::string part = getPartPath(file_id);
+  unlink(part.c_str());
+  metas_.erase(file_id);
+  return saveMeta();
+}
+
+bool FileManager::saveMeta() {
+  nlohmann::json j;
+  j["files"] = nlohmann::json::array();
+  for(auto& [id,m] : metas_) {
+    nlohmann::json item;
+    to_json(item,m);
+    j["files"].push_back(item);
+  }
+  std::ofstream ofs(meta_path_);
+  if(!ofs.is_open()) return false;
+  ofs << std::setw(4) << j;
+  return true;
+}
+
+bool FileManager::loadMeta() {
+  std::ifstream ifs(meta_path_);
+  if(!ifs.is_open()) return false;
+  nlohmann::json j;
+  try {
+    ifs >> j;
+  } catch(...) {
+    return false;
+  }
+  metas_.clear();
+  if(j.contains("files")) {
+    for(auto& item : j["files"]) {
+      FileMeta m;
+      from_json(item,m);
+      metas_[m.file_id] = m;
+    }
+  }
+  id_counter_.store(metas_.size());
+  return true;
+}
+
+void FileManager::cleanupOrphans() {
+  std::error_code ec;
+  for(auto& entry : std::filesystem::directory_iterator(storage_dir_ + "tmp",ec)) {
+    if(ec) break;
+    if(entry.path().extension() != ".uploading") continue;
+    std::string id = entry.path().stem().string();
+    if(metas_.find(id) == metas_.end()) {
+      std::filesystem::remove(entry.path(),ec);
+    }
+  }
+  bool changed = false;
+  uint64_t now = now_ms();
+  for(auto it = metas_.begin(); it != metas_.end(); ) {
+    if(it->second.status == 0 && now - it->second.upload_time > UPLOAD_STALE_MS) {
+      std::string part = getPartPath(it->first);
+      unlink(part.c_str());
+      it = metas_.erase(it);
+      changed = true;
+    } else {
+      it++;
+    }
+  }
+  if(changed) saveMeta();
 }

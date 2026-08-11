@@ -29,17 +29,17 @@ private:
 
 class UsrManager {
 public:
-  bool verify(const std::string& username,const std::string& password); //验证密码
+  bool verify(int uid,const std::string& password); // 验证密码
   bool regis(const std::string& username,const std::string& password,int uid);
   bool login(const std::string& username,const std::string& password,int& out_uid);
-  bool delUsr(int uid);
+  bool delUsr(int uid,const std::string& password);
 
   bool load(const std::string& path);
   bool save(const std::string& path);
 
   int getMaxUid();
   bool isExist(const std::string& username);
-  User* getUser(int uid);
+  std::optional<User> getUser(int uid);
     
 private:
   std::unordered_map<int,Account> uid_map;
@@ -86,7 +86,7 @@ public:
   std::vector<Message> getMessagesByTime(int uid,uint64_t time); //获取某个时间后的所有消息，可用于离线消息的同步
   std::vector<Message> getAllMsg(int uid); //获取所有消息
   std::vector<Message> getHistory(int uid1,int uid2);
-  std::vector<Message> getGroupMessages(int gid,uint64_t after_time);
+  // std::vector<Message> getGroupMessages(int gid,uint64_t after_time);
   std::string getMsgId();
 
   bool removeUsr(int uid);
@@ -102,7 +102,6 @@ private:
 
 class GroupManager {
 public:
-  // int creatGroup(int owner_uid,std::string& name,int& out_gid);
   int createGroup(const User& owner,std::string& name,int& out_gid);
   int disbandGroup(int group_id,int uid);
   int renameGroup(int group_id,int handler_id,std::string& new_name);
@@ -112,6 +111,7 @@ public:
   int handleRequest(int group_id,int handler_uid,const User& target_usr,bool approval);
   int leaveGroup(int group_id,int uid);
   int kickMember(int group_id,int handler_uid,int target_id);
+  int removeUser(int uid); // 注销相关，退出所有群，群主则解散其群
   // 管理员设置
   int setAdmin(int group_id,int handler_uid,int target_id,bool admin);
   // 消息免打扰设置
@@ -147,19 +147,31 @@ public:
   FileManager(const std::string& meta_path = "./data/filemeta.json",const std::string& storage_dir = "./data/files/");
 
   bool init();
-  bool addFileMeta(const FileMeta& meta);
+  bool addFileMeta(const FileMeta& meta); // 新增文件元数据
+  bool updateFileMeta(const FileMeta& meta); // 更新已有条目
   std::optional<FileMeta> getFileMeta(const std::string& file_id);
-  std::string generateFileId();
-  std::string getFullPath(const std::string& storage_path);
+  std::optional<FileMeta> findIncomplete(const std::string& hash,int uid,const std::string& chat_type,int target_id);// 按 哈希,上传者,目标 查找未完成任务（重启后续传）
   std::vector<FileMeta> getAllMeta();
+  std::string generateFileId();
+  std::string makeStoragePath(const std::string& file_id); // 格式类似 "f1/23/f123456"
+  // 路径
+  std::string getFullPath(const std::string& storage_path); // 根目录 + 相对路径
+  std::string getPartPath(const std::string& file_id); // tmp/<file_id>.uploading
+  // 上传生命周期
+  bool createPart(const std::string& file_id); // 建 .uploading (正在传输的文件)
+  bool writePart(const std::string& file_id,uint64_t offset,const char* data,size_t len); // 写 .uploading 并更新进度
+  uint64_t getPartSize(const std::string& file_id); // 当前已接收字节（续传相关）
+  bool finishUpload(const std::string& file_id); // 将 .uploading 正式存入, status=1
+  bool removePart(const std::string& file_id); // 失败/放弃时清理
 
 private:
   bool loadMeta();
   bool saveMeta();
+  void cleanupOrphans(); // 启动时清理
 
 private:
   std::string meta_path_;
-  std::string storage_dir_; // 文件存储根目录
+  std::string storage_dir_; // 文件存储目录（以 / 结尾）
   std::unordered_map<std::string,FileMeta> metas_; // file_id -> FileMeta
   mutable std::mutex mtx_;
   std::atomic<uint64_t> id_counter_{0};
