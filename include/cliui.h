@@ -1,4 +1,5 @@
 #include "service.h"
+#include "context.h"
 
 enum class ClientState {
   LOGIN,

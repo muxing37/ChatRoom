@@ -1,5 +1,6 @@
 #include "client.h"
 #include "service.h"
+#include "context.h"
 #include "webui.h"
 #include "cliui.h"
 
@@ -59,8 +60,10 @@ int start_client() {
   AuthService authService(network,ctx);
   FriendService friendService(network,ctx);
   ChatService chatService(network,ctx);
-  CliUI menu(authService,friendService,chatService,ctx);
+  GroupService groupService(network,ctx);
+  FileService fileService(network,ctx);
 
+  CliUI menu(authService,friendService,chatService,ctx);  
   network.start();
 
   menu.run();

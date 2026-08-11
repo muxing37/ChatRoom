@@ -2,6 +2,19 @@
 
 TcpSocket::TcpSocket(int sockfd) : sockfd_(sockfd) {}
 
+TcpSocket::TcpSocket(TcpSocket&& other) noexcept : sockfd_(other.sockfd_) {
+  other.sockfd_ = -1;
+}
+
+TcpSocket& TcpSocket::operator=(TcpSocket&& other) noexcept {
+  if(this != &other) {
+    if(sockfd_ != -1) close(sockfd_);
+    sockfd_ = other.sockfd_;
+    other.sockfd_ = -1;
+  }
+  return *this;
+}
+
 TcpSocket::~TcpSocket() {
   close(sockfd_);
   sockfd_ = -1;
@@ -12,18 +25,51 @@ void TcpSocket::closefd() {
   sockfd_ = -1;
 }
 
-uint64_t htonll(uint64_t num) {
-  uint32_t high = htonl((uint32_t)(num >> 32));
-  uint32_t low  = htonl((uint32_t)(num & 0xFFFFFFFF));
-
-  return ((uint64_t)low << 32) | high;
+std::string TcpSocket::localIp() const {
+  sockaddr_in addr;
+  socklen_t len = sizeof(addr);
+  if(sockfd_ < 0) return "127.0.0.1";
+  if(getsockname(sockfd_,(sockaddr*)&addr,&len) == -1) return "127.0.0.1";
+  char buf[INET_ADDRSTRLEN];
+  if(inet_ntop(AF_INET,&addr.sin_addr,buf,sizeof(buf)) == nullptr) return "127.0.0.1";
+  return buf;
 }
 
-uint64_t ntohll(uint64_t num) {
-  uint32_t high = ntohl((uint32_t)(num >> 32));
-  uint32_t low  = ntohl((uint32_t)(num & 0xFFFFFFFF));
+int TcpSocket::sendRaw(const void* data,size_t len) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  const char* p = (const char*)data;
+  size_t total = 0;
+  while(total < len) {
+    ssize_t n = send(sockfd_, p+total, len-total, 0);
+    if(n > 0) total += (size_t)n;
+    else if(n == 0) return -1;
+    else {
+      if(errno == EINTR) continue;
+      return -1;
+    }
+  }
+  return 0;
+}
 
-  return ((uint64_t)low << 32) | high;
+int TcpSocket::recvRaw(void* buf,size_t len) {
+  while(true) {
+    ssize_t n = recv(sockfd_, buf, len, 0);
+    if(n > 0) return (int)n;
+    if(n == 0) return 0;
+    if(errno == EINTR) continue;
+    return -1;
+  }
+}
+
+std::shared_ptr<TcpSocket> TcpSocket::connect(const std::string& ip,unsigned short port) {
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if(fd < 0) return nullptr;
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  if(inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) != 1) { close(fd); return nullptr; }
+  if(::connect(fd,(sockaddr*)&addr,sizeof(addr)) < 0) { close(fd); return nullptr; }
+  return std::make_shared<TcpSocket>(fd);
 }
 
 int send_all(int fd,void *buf,size_t len) {
@@ -44,6 +90,7 @@ int send_all(int fd,void *buf,size_t len) {
 }
 
 NetResult TcpSocket::sendMsg(std::string msg) {
+  std::lock_guard<std::mutex> lock(mtx_);
   uint32_t l=msg.size();
   uint32_t len=htonl(l);
   std::cout << "[SEND fd=" << sockfd_ << "] " << msg << std::endl;
@@ -54,65 +101,6 @@ NetResult TcpSocket::sendMsg(std::string msg) {
   if(send_all(sockfd_,msg.data(),msg.size())!=(int)msg.size()) {
     return NetResult::SEND_ERROR;
   }
-  return NetResult::OK;
-}
-
-NetResult TcpSocket::sendFile(std::string& path,uint64_t offset) {
-  int fd = open(path.c_str(),O_RDONLY);
-  if(fd < 0) {
-    return NetResult::FILE_ERROR;
-  }
-  struct stat st;
-  if(fstat(fd, &st) == -1) {
-    close(fd);
-    return NetResult::FILE_ERROR;
-  }
-
-  uint64_t filesize = st.st_size;
-
-  if(offset > filesize) {
-    close(fd);
-    return NetResult::FILE_ERROR;
-  }
-
-  if(offset > 0) {
-    lseek(fd, offset, SEEK_SET);
-  }
-
-  uint64_t remainSize = filesize - offset;
-  uint64_t netSize = htonll(remainSize);
-
-  if(send_all(sockfd_,&netSize,sizeof(netSize))!= sizeof(netSize)) {
-    close(fd);
-    return NetResult::SEND_ERROR;
-  }
-  char buf[4096];
-  auto start = std::chrono::steady_clock::now();
-  uint64_t sent = 0;
-  while(true) {
-    int n = read(fd,buf,sizeof(buf));
-    if(n>0) {
-      if(send_all(sockfd_,buf,n) != n) {
-        close(fd);
-        return NetResult::SEND_ERROR;
-      }
-    } else if(n==0) {
-      break;
-    } else {
-      close(fd);
-      return NetResult::SEND_ERROR;
-    }
-    sent += n;
-
-    double percent = 100.0 * (offset + sent) / filesize;
-    auto now = std::chrono::steady_clock::now();
-    double seconds = std::chrono::duration<double>(now-start).count();
-    double speed = sent / 1024.0 / 1024.0 / seconds;
-    std::cout << "\rUploading: " << std::fixed << std::setprecision(1) << percent << "% " << speed << " MB/s" << std::flush;
- 
-  }
-  std::cout << "\n";
-  close(fd);
   return NetResult::OK;
 }
 
@@ -146,7 +134,6 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
   if(ret!=sizeof(len)) return NetResult::RECV_ERROR;
 
   uint32_t l=ntohl(len);
-  // std::cout << "host len = " << l << std::endl;
   const uint32_t MAX_LEN=100*1024*1024;
   if(l>MAX_LEN) {
     return NetResult::RECV_ERROR;
@@ -161,62 +148,6 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
     }
   }
   std::cout << "[RECV fd=" << sockfd_ << "] " << "\"" << msg << "\"" << std::endl;
-  // std::cout << "data: ";
-  // for(unsigned char c : msg) printf("%02X ", c);
-  // std::cout << std::endl;
 
-  return NetResult::OK;
-}
-
-NetResult TcpSocket::recvFile(std::string& path,uint64_t offset) {
-  int fd = open(path.c_str(), O_WRONLY | O_CREAT, 0644);
-  if(fd < 0) {
-    return NetResult::RECV_ERROR;
-  }
-  if(offset > 0) {
-    lseek(fd, offset, SEEK_SET);
-  }
-
-  uint64_t netSize = 0;
-  int ret = recv_all(sockfd_, &netSize, sizeof(netSize));
-
-  if(ret != sizeof(netSize)) {
-    close(fd);
-    return NetResult::RECV_ERROR;
-  }
-
-  uint64_t remain = ntohll(netSize);
-
-  std::vector<char> buf(1024 * 1024);
-  auto start = std::chrono::steady_clock::now();
-
-  uint64_t received = 0;
-  uint64_t totalSize = offset + ntohll(netSize);
-
-  while(remain > 0) {
-    int chunk = remain > buf.size() ? buf.size() : remain;
-    int n = recv_all(sockfd_, buf.data(), chunk);
-
-    if(n <= 0) {
-      close(fd);
-      return NetResult::RECV_ERROR;
-    }
-
-    int written = write(fd, buf.data(), n);
-    if(written != n) {
-      close(fd);
-      return NetResult::RECV_ERROR;
-    }
-    remain -= n;
-
-    received += n;
-    double percent = 100.0 * (offset + received) / totalSize;
-    auto now = std::chrono::steady_clock::now();
-    double seconds = std::chrono::duration<double>(now - start).count();
-    double speed = received / 1024.0 / 1024.0 / seconds;
-    std::cout << "\rDownloading: " << std::fixed << std::setprecision(1) << percent << "% " << speed << " MB/s" << std::flush;
-  }
-  std::cout << "\n";
-  close(fd);
   return NetResult::OK;
 }

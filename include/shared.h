@@ -6,16 +6,14 @@
 #include <chrono>
 
 struct User {
-    int uid;
+    int uid = 0;
     std::string username;
-    bool online;
-    // std::string password;
+    bool online = false;
 };
 
 struct Account {
     int uid;
     std::string username;
-    std::string password;
     std::string password_hash;
     std::string salt;
 };
@@ -84,7 +82,7 @@ struct Message {
     std::string content;
     uint64_t time;
 
-    int status;  // 0:待发送(接收方离线) 1:已送达  （已弃用）
+    int status;
 };
 
 inline void to_json(nlohmann::json& j,const Message& msg) {
@@ -111,17 +109,21 @@ inline void from_json(const nlohmann::json& j,Message& msg) {
 }
 
 struct FileMeta {
-    std::string file_id; // 唯一标识
+    std::string file_id;
     std::string file_name; // 原始文件名
     int64_t file_size; // 文件大小（字节）
     int uploader_uid; // 上传者 uid
     uint64_t upload_time; // 上传完成时间
-    std::string storage_path; // 相对于 data/files/ 的存储路径
+    std::string storage_path; // 相对于 data/files/ 的存储路径，如 "f1/23/f123456"
     std::string file_hash; // 文件哈希
+    std::string chat_type; // private 或 group
+    int target_id; // uid 或 gid
+
+    int status; // 0:上传中(.uploading) 1:已完成
+    uint64_t received; // 已接收字节（断点续传起点）
 };
 
-// 序列化与反序列化
-inline void to_json(nlohmann::json& j, const FileMeta& f) {
+inline void to_json(nlohmann::json& j,const FileMeta& f) {
     j = nlohmann::json{
         {"file_id",f.file_id},
         {"file_name",f.file_name},
@@ -129,21 +131,31 @@ inline void to_json(nlohmann::json& j, const FileMeta& f) {
         {"uploader_uid",f.uploader_uid},
         {"upload_time",f.upload_time},
         {"storage_path",f.storage_path},
-        {"file_hash",f.file_hash}
+        {"file_hash",f.file_hash},
+        {"chat_type",f.chat_type},
+        {"target_id",f.target_id},
+        {"status",f.status},
+        {"received",f.received}
     };
 }
 
-inline void from_json(const nlohmann::json& j, FileMeta& f) {
+inline void from_json(const nlohmann::json& j,FileMeta& f) {
     j.at("file_id").get_to(f.file_id);
     j.at("file_name").get_to(f.file_name);
     j.at("file_size").get_to(f.file_size);
     j.at("uploader_uid").get_to(f.uploader_uid);
     j.at("upload_time").get_to(f.upload_time);
     j.at("storage_path").get_to(f.storage_path);
-    if (j.contains("file_hash"))
-        j.at("file_hash").get_to(f.file_hash);
-    else
-        f.file_hash.clear();
+    if(j.contains("file_hash")) j.at("file_hash").get_to(f.file_hash);
+    else f.file_hash.clear();
+    if(j.contains("chat_type")) j.at("chat_type").get_to(f.chat_type);
+    else f.chat_type.clear();
+    if(j.contains("target_id")) j.at("target_id").get_to(f.target_id);
+    else f.target_id = 0;
+    if(j.contains("status")) j.at("status").get_to(f.status);
+    else f.status = 1;
+    if(j.contains("received")) j.at("received").get_to(f.received);
+    else f.received = 0;
 }
 
 inline uint64_t now_ms() {

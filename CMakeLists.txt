@@ -12,6 +12,8 @@ add_executable(server
     src/server.cpp
     src/socket.cpp
     src/manager.cpp
+    src/hash.cpp
+    src/imgmeta.cpp
 )
 
 # client
@@ -20,14 +22,17 @@ add_executable(client
     src/client.cpp
     src/socket.cpp
     src/service.cpp
+    src/context.cpp
     src/webui.cpp
     src/cliui.cpp
+    src/hash.cpp
 )
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(READLINE REQUIRED readline)
+find_package(OpenSSL REQUIRED)
 
 include_directories(${READLINE_INCLUDE_DIRS})
 
-target_link_libraries(server PRIVATE ${READLINE_LIBRARIES})
-target_link_libraries(client PRIVATE ${READLINE_LIBRARIES})
+target_link_libraries(server PRIVATE ${READLINE_LIBRARIES} OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(client PRIVATE ${READLINE_LIBRARIES} OpenSSL::SSL OpenSSL::Crypto)

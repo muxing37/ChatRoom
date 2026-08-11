@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <fcntl.h>
 #include <thread>
+#include <mutex>
 
 enum class NetResult {
   OK,
@@ -25,15 +26,24 @@ enum class NetResult {
 class TcpSocket {
 public:
   TcpSocket(int sockfd);
+  TcpSocket(TcpSocket&& other) noexcept;
+  TcpSocket& operator=(TcpSocket&& other) noexcept;
+  TcpSocket(const TcpSocket&) = delete;
+  TcpSocket& operator=(const TcpSocket&) = delete;
   ~TcpSocket();
 
   void closefd();
   NetResult sendMsg(std::string msg);
   NetResult recvMsg(std::string& msg);
+  // 原始字节收发（文件数据通道用）
+  int sendRaw(const void* data,size_t len);
+  int recvRaw(void* buf,size_t len);
 
-  NetResult sendFile(std::string& path,uint64_t offset);
-  NetResult recvFile(std::string& path,uint64_t offset);
+  std::string localIp() const;
+
+  static std::shared_ptr<TcpSocket> connect(const std::string& ip,unsigned short port);
 
 private:
   int sockfd_;
+  std::mutex mtx_;
 };
