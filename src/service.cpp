@@ -1,294 +1,11 @@
 #include "service.h"
+#include "context.h"
+#include "hash.h"
+#include <iostream>
+#include <cstdlib>
+#include <algorithm>
 
-// 用户本人
-void ClientContext::setSelf(const User& user) {
-  std::lock_guard lock(mtx_);
-  self_=user;
-}
-
-User ClientContext::getSelf() {
-  std::lock_guard lock(mtx_);
-  return self_;
-}
-// 好友相关
-void ClientContext::setFriendList(const std::vector<User>& list) {
-  std::lock_guard lock(mtx_);
-  friends_.clear();
-  for(auto &u : list) friends_[u.uid] = u;
-}
-
-std::vector<User> ClientContext::getFriendList() {
-  std::lock_guard lock(mtx_);
-  std::vector<User> res;
-  for(auto &[id,u] : friends_) {
-    std::cout << u.username << std::endl;
-    res.push_back(u);
-  }
-  return res;
-}
-
-bool ClientContext::hasFriend(int uid) {
-  std::lock_guard lock(mtx_);
-  return friends_.count(uid);
-}
-
-std::optional<User> ClientContext::getFriend(int uid) {
-  std::lock_guard lock(mtx_);
-  auto it=friends_.find(uid);
-  if(it==friends_.end()) return std::nullopt;
-  return it->second;
-}
-
-void ClientContext::addFriendRequest(const User& user) {
-  std::lock_guard lock(mtx_);
-  friendRequests_[user.uid]=user;
-}
-
-void ClientContext::addFriend(const User& user) {
-  std::lock_guard lock(mtx_);
-  friends_[user.uid]=user;
-}
-
-void ClientContext::delFriend(int uid) {
-  std::lock_guard lock(mtx_);
-  friends_.erase(uid);
-}
-
-void ClientContext::setFriendRequests(const std::vector<User>& list) {
-  std::lock_guard lock(mtx_);
-  friendRequests_.clear();
-  for(auto &u:list) friendRequests_[u.uid]=u;
-}
-
-std::vector<User> ClientContext::getFriendRequests() {
-  std::lock_guard lock(mtx_);
-  std::vector<User> res;
-  for(auto &[id,u]:friendRequests_) res.push_back(u);
-  return res;
-}
-
-void ClientContext::addBlock(int uid) {
-  std::lock_guard lock(mtx_);
-  blocked_.insert(uid);
-}
-
-void ClientContext::unBlock(int uid) {
-  std::lock_guard lock(mtx_);
-  blocked_.erase(uid);
-}
-
-bool ClientContext::isBlocked(int uid) {
-  std::lock_guard lock(mtx_);
-  if(blocked_.count(uid)) {
-    return true;
-  }
-  return false;
-}
-
-void ClientContext::setBlockList(const std::vector<int>& list) {
-  std::lock_guard lock(mtx_);
-  blocked_.clear();
-  for(int uid : list) {
-    blocked_.insert(uid);
-  }
-}
-
-std::vector<int> ClientContext::getBlockList() {
-  std::lock_guard lock(mtx_);
-  std::vector<int> result;
-  for(auto uid : blocked_) {
-    result.push_back(uid);
-  }
-  return result;
-}
-
-// 聊天相关
-void ClientContext::addMessage(const Message& msg) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  if(msg.chat_type == "private") {
-    if(msg.from_uid == self_.uid) {
-      msgs_[msg.target_id].push_back(msg);
-    } else {
-      msgs_[msg.from_uid].push_back(msg);
-    }
-  } else if(msg.chat_type == "group") {
-    msgs_[msg.target_id].push_back(msg);
-  }
-}
-
-std::vector<Message> ClientContext::getMessage(int id) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  auto it = msgs_.find(id);
-
-  if(it == msgs_.end()) return {};
-  return it->second;
-}
-
-void ClientContext::setMessage(int id,const std::vector<Message>& msgs) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  msgs_[id] = msgs;
-}
-
-void ClientContext::loadMoreMessages(int uid,const std::vector<Message>& msgs) {
-
-}
-
-void ClientContext::updateLastSyncTime(uint64_t t) {
-  std::lock_guard lock(mtx_);
-  if(t > last_sync_time_) last_sync_time_ = t;
-}
-
-uint64_t ClientContext::getLastSyncTime() {
-  std::lock_guard lock(mtx_);
-  return last_sync_time_;
-}
-
-bool ClientContext::isMessageRepeat(const std::string& msg_id) {
-  std::lock_guard lock(mtx_);
-  return known_msg_.count(msg_id);
-}
-
-void ClientContext::markMessageReceived(const std::string& msg_id) {
-  std::lock_guard lock(mtx_);
-  known_msg_.insert(msg_id);
-}
-
-// 群组相关
-  // 群组列表
-void ClientContext::setGroupList(const std::vector<GroupInfo>& list) {
-  std::lock_guard lock(mtx_);
-  groupMap_.clear();
-  groupSort_.clear();
-  for(auto& g : list) {
-    groupMap_[g.group_id] = g;
-    groupSort_.push_back(g.group_id);
-  }
-}
-
-std::vector<GroupInfo> ClientContext::getGroupList() {
-  std::lock_guard lock(mtx_);
-  std::vector<GroupInfo> res;
-  for(int gid : groupSort_) {
-    auto it = groupMap_.find(gid);
-    if(it != groupMap_.end()) res.push_back(it->second);
-  }
-  return res;
-}
-
-void ClientContext::addGroup(const GroupInfo& g) {
-  std::lock_guard lock(mtx_);
-  if(groupMap_.count(g.group_id)) return;
-  groupMap_[g.group_id] = g;
-  groupSort_.push_back(g.group_id);
-}
-
-void ClientContext::removeGroup(int gid) {
-  std::lock_guard lock(mtx_);
-  if(groupMap_.count(gid)) return;
-  groupMap_.erase(gid);
-  groupSort_.erase(std::remove(groupSort_.begin(),groupSort_.end(),gid),groupSort_.end());
-  groupMembers_.erase(gid);
-  usrPermission_.erase(gid);
-  usrRemind_.erase(gid);
-}
-
-  // 群成员
-void ClientContext::setGroupMembers(int gid,const std::vector<GroupMember>& members) {
-  std::lock_guard lock(mtx_);
-  groupMembers_[gid] = members;
-}
-
-std::vector<GroupMember> ClientContext::getGroupAllMembers(int gid) {
-  std::lock_guard lock(mtx_);
-  auto it = groupMembers_.find(gid);
-  if(it != groupMembers_.end()) {
-    return it->second;
-  }
-  return {};
-}
-
-void ClientContext::addGroupMember(int gid,const GroupMember& m) {
-  std::lock_guard lock(mtx_);
-  auto& mem = groupMembers_[gid];
-  for(auto& me : mem) {
-    if(me.uid == m.uid) {
-      me = m;
-      return;
-    }
-  }
-  mem.push_back(m);
-}
-
-void ClientContext::removeGroupMember(int gid,int uid) {
-  std::lock_guard lock(mtx_);
-  auto it = groupMembers_.find(gid);
-  if (it == groupMembers_.end()) return;
-  auto& mem = it->second;
-  mem.erase(std::remove_if(mem.begin(),mem.end(),
-    [uid](const GroupMember& m) { return m.uid == uid; }),mem.end());
-}
-
-std::optional<GroupMember> ClientContext::getGroupMember(int gid,int uid) {
-  std::lock_guard lock(mtx_);
-  auto it = groupMembers_.find(gid);
-  if(it == groupMembers_.end()) return std::nullopt;
-  for(auto& m : it->second) {
-    if(m.uid == uid) return m;
-  }
-  return std::nullopt;
-}
-
-  // 本人在群内的信息
-void ClientContext::setSelfPermission(int gid,int perm) {
-  std::lock_guard lock(mtx_);
-  usrPermission_[gid] = perm;
-}
-
-int ClientContext::getSelfPermission(int gid) {
-  std::lock_guard lock(mtx_);
-  auto it = usrPermission_.find(gid);
-  if(it != usrPermission_.end()) {
-    return it->second;
-  }
-  return -1;
-}
-
-void ClientContext::setSelfRemind(int gid,int remind) {
-  std::lock_guard lock(mtx_);
-  usrRemind_[gid] = remind;
-}
-
-int ClientContext::getSelfRemind(int gid) {
-  std::lock_guard lock(mtx_);
-  auto it = usrRemind_.find(gid);
-  if(it != usrRemind_.end()) {
-    return it->second;
-  }
-  return 0;
-}
-
-// 本地信息存储相关
-std::unordered_map<int,std::vector<Message>> ClientContext::getAllMessages() const {
-  std::lock_guard<std::mutex> lock(mtx_);
-  return msgs_;
-}
-
-void ClientContext::loadMessages(const std::unordered_map<int,std::vector<Message>>& allMsgs) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  uint64_t maxTime = 0;
-  for(const auto& [id,msgs] : allMsgs) {
-    for(const auto& msg : msgs) {
-      if(known_msg_.count(msg.message_id)) continue;
-      known_msg_.insert(msg.message_id);
-      msgs_[id].push_back(msg);
-      if(msg.time > maxTime) maxTime = msg.time;
-    }
-  }
-
-  if (maxTime > last_sync_time_) last_sync_time_ = maxTime;
-}
-
-//----------------------------------------------------
+namespace { constexpr size_t FILE_CHUNK = 1024 * 1024; }
 
 ChatStorage::ChatStorage(const std::string& filepath) : filepath_(filepath) {}
 
@@ -444,6 +161,7 @@ bool AuthService::login(const std::string& username,const std::string& password)
   if(reply["status"] != 0) {
     return false;
   }
+  ctx_.reset(); // 清空上个会话的本地状态
   User user;
   user.uid = reply["data"]["uid"];
   user.username=username;
@@ -465,11 +183,32 @@ bool AuthService::regis(const std::string& username,const std::string& password)
   if(reply["status"] != 0) {
     return false;
   }
+  ctx_.reset(); // 清空上个会话的本地状态
   User user;
   user.uid = reply["data"]["uid"];
   user.username = username;
   ctx_.setSelf(user);
   return true;
+}
+
+bool AuthService::logout() {
+  nlohmann::json j;
+  j["type"] = "user";
+  j["action"] = "logout";
+  auto reply = network_.request(j);
+  return reply["status"] == 0;
+}
+
+bool AuthService::delauth(const std::string& password) {
+  nlohmann::json j;
+  j["type"] = "user";
+  j["action"] = "delete";
+  j["data"] = {
+    {"password",password},
+    {"uid",ctx_.getSelf().uid}
+  };
+  auto reply = network_.request(j);
+  return reply["status"] == 0;
 }
 
 FriendService::FriendService(ClientNetwork& network,ClientContext& context) : network_(network),ctx_(context) {}
@@ -509,6 +248,7 @@ int FriendService::listFriend() {
     User user;
     user.uid = x["uid"];
     user.username = x["username"];
+    user.online = x.value("online",false);
     list.push_back(user);
   }
   ctx_.setFriendList(list);
@@ -592,6 +332,31 @@ int FriendService::getBlockList() {
   return 0;
 }
 
+void FriendService::handlePush(const nlohmann::json& push) {
+  if(push["type"] != "friend") return;
+  std::string action = push.value("action","");
+  if(action == "request") {
+    User u;
+    u.uid = push["data"]["uid"];
+    u.username = push["data"]["username"];
+    ctx_.addFriendRequest(u);
+  } else if(action == "agree") {
+    User u;
+    u.uid = push["data"]["uid"];
+    u.username = push["data"]["username"];
+    ctx_.addFriend(u);
+    ctx_.removeFriendRequest(u.uid);
+  } else if(action == "reject") {
+    ctx_.removeFriendRequest(push["data"].value("uid",0));
+  } else if(action == "del") {
+    ctx_.delFriend(push["data"].value("uid",0));
+  } else if(action == "online") {
+    ctx_.setFriendOnline(push["data"].value("uid",0),true);
+  } else if(action == "offline") {
+    ctx_.setFriendOnline(push["data"].value("uid",0),false);
+  }
+}
+
 ChatService::ChatService(ClientNetwork& network,ClientContext& ctx) : network_(network),ctx_(ctx){}
 
 int ChatService::sendPrivateMessage(int to_uid,const std::string& text) {
@@ -651,7 +416,7 @@ int ChatService::syncHistory() {
   uint64_t last_time = ctx_.getLastSyncTime();
   nlohmann::json j;
   j["type"] = "chat";
-  j["action"] = "private_history_sync";
+  j["action"] = "sync_new";
   j["data"] = {
     {"from_uid",self_uid},
     {"last_time",last_time}
@@ -744,7 +509,7 @@ int GroupService::handleJoinRequest(int gid,int target_uid,bool approval) {
   j["data"] = {
     {"from_uid",ctx_.getSelf().uid},
     {"group_id",gid},
-    {"target_id",target_uid},
+    {"target_uid",target_uid},
     {"approval",approval}
   };
   nlohmann::json reply = network_.request(j);
@@ -860,8 +625,8 @@ int GroupService::listMembers(int gid) {
   ctx_.setGroupMembers(gid,members);
   for(auto& m : members) {
     if(m.uid == ctx_.getSelf().uid) {
-      ctx_.setSelfPermission(gid, m.permission);
-      ctx_.setSelfRemind(gid, m.remind);
+      ctx_.setSelfPermission(gid,m.permission);
+      ctx_.setSelfRemind(gid,m.remind);
       break;
     }
   }
@@ -888,10 +653,40 @@ int GroupService::listJoinRequests(int gid,std::vector<User>& out_requests) {
   return 0;
 }
 
+int GroupService::syncJoinRequests() {
+  nlohmann::json j;
+  j["type"] = "group";
+  j["action"] = "list_all_join_requests";
+  j["data"] = {
+    {"from_uid",ctx_.getSelf().uid}
+  };
+  auto reply = network_.request(j);
+  if(reply["status"] != 0) return reply["status"];
+  ctx_.clearGroupJoinRequests();
+  for(auto& item : reply["data"]["groups"]) {
+    int gid = item["gid"];
+    std::vector<User> reqs;
+    for(auto& r : item["requests"]) {
+      User u;
+      u.uid = r["uid"];
+      u.username = r["username"];
+      reqs.push_back(u);
+    }
+    ctx_.setGroupJoinRequests(gid,reqs);
+  }
+  return 0;
+}
+
 void GroupService::handlePush(const nlohmann::json& push) {
   if(push["type"] == "group") {
     if(push["action"] == "kicked") {
       ctx_.removeGroup(push["data"]["group_id"]);
+    }
+    if(push["action"] == "join_request") {
+      User u;
+      u.uid = push["data"].value("apply_uid",0);
+      u.username = push["data"].value("apply_name","");
+      ctx_.addGroupJoinRequest(push["data"].value("group_id",0),u);
     }
     if(push["action"] == "join_result") {
       if(push["data"]["approval"] == true) {
@@ -912,17 +707,25 @@ void GroupService::handlePush(const nlohmann::json& push) {
     if(push["action"] == "member_update") {
       std::string update_type = push["data"].value("update_type","");
       int gid = push["data"]["group_id"];
-      int m_uid = push["data"]["member_uid"];
+      int m_uid = push["data"].value("member_uid",0);
       if(update_type == "set_admin") {
-        auto m = ctx_.getGroupMember(gid,m_uid).value();
-        m.permission = push["data"]["new_permission"];
-        ctx_.addGroupMember(gid,m);
+        auto om = ctx_.getGroupMember(gid,m_uid);
+        if(om) {
+          auto m = *om;
+          m.permission = push["data"].value("new_permission",2);
+          ctx_.addGroupMember(gid,m);
+        }
       }
       if(update_type == "kick" || update_type == "leave") {
         ctx_.removeGroupMember(gid,m_uid);
       }
       if(update_type == "join") {
-        GroupMember m = push["data"].get<GroupMember>();
+        GroupMember m;
+        m.uid = m_uid;
+        m.usr_name = push["data"].value("member_name","");
+        m.permission = push["data"].value("permission",2);
+        m.join_time = push["data"].value("join_time",(uint64_t)now_ms());
+        m.remind = push["data"].value("remind",0);
         ctx_.addGroupMember(gid,m);
       }
       if(update_type == "disbanded") {
@@ -933,4 +736,176 @@ void GroupService::handlePush(const nlohmann::json& push) {
 }
 
 FileService::FileService(ClientNetwork& network,ClientContext& ctx) : network_(network),ctx_(ctx){}
+
+std::optional<FileService::DataLink> FileService::makeLink(const std::string& action,const nlohmann::json& data) {
+  nlohmann::json j;
+  j["type"] = "file";
+  j["action"] = action;
+  j["data"] = data;
+  j["data"]["from_uid"] = ctx_.getSelf().uid;
+  auto reply = network_.request(j);
+  if(reply["status"] != 0) return std::nullopt;
+  DataLink dl;
+  dl.ip = reply["data"].value("ip",std::string());
+  dl.port = (unsigned short)reply["data"].value("port",0);
+  dl.token = reply["data"].value("token",std::string());
+  dl.file_id = reply["data"].value("file_id",std::string());
+  dl.offset = reply["data"].value("offset",(uint64_t)0);
+  dl.file_size = reply["data"].value("file_size",(uint64_t)0);
+  if(dl.ip.empty() || dl.port == 0 || dl.token.empty()) return std::nullopt;
+  return dl;
+}
+
+bool FileService::dataHandshake(const std::shared_ptr<TcpSocket>& sock,const std::string& token) {
+  nlohmann::json j = {
+    {"token",token},
+    {"uid",ctx_.getSelf().uid}
+  };
+  if(sock->sendMsg(j.dump()) != NetResult::OK) return false;
+  std::string ack;
+  if(sock->recvMsg(ack) != NetResult::OK) return false;
+  try {
+    auto r = nlohmann::json::parse(ack);
+    return r.value("status",-1) == 0;
+  } catch(...) {
+    return false;
+  } 
+}
+
+int FileService::uploadFile(
+  const std::string& path,
+  const std::string& chat_type,
+  int target_id,
+  const std::string& resume_file_id,
+  ProgressBack progress,
+  const std::string& f_name
+) {
+  std::string full_path = path;
+  if(!full_path.empty() && full_path[0] == '~' && (full_path.size() == 1 || full_path[1] == '/')) {
+    const char* home = getenv("HOME");
+    if(home) full_path = std::string(home) + full_path.substr(1);
+  }
+  struct stat st;
+  if(stat(full_path.c_str(),&st) != 0) {
+    std::cerr << "[FileService] 上传失败: 路径不存在或不可访问: " << full_path << std::endl;
+    return -1;
+  }
+  if(!S_ISREG(st.st_mode)) {
+    std::cerr << "[FileService] 上传失败: 不是普通文件: " << full_path << std::endl;
+    return -2;
+  }
+  uint64_t file_size = (uint64_t)st.st_size;
+  if(file_size == 0) {
+    std::cerr << "[FileService] 上传失败: 空文件: " << full_path << std::endl;
+    return -3;
+  }
+  std::string file_name = f_name;
+  if(file_name.empty()) {
+    auto slash = full_path.find_last_of('/');
+    if(slash == std::string::npos) {
+      file_name = full_path;
+    } else {
+      file_name = full_path.substr(slash + 1);
+    }
+  }
+  std::string file_hash = sha256File(full_path);
+
+  std::string file_id = resume_file_id;
+  for(int i = 0;i < 3;i++) {
+    nlohmann::json data = {
+      {"chat_type",chat_type},
+      {"target_id",target_id},
+      {"file_name",file_name},
+      {"file_size",file_size},
+      {"file_id",file_id},
+      {"file_hash",file_hash}
+    };
+    auto dl = makeLink("upload_req",data);
+    if(!dl) {
+      std::cerr << "[FileService] 上传失败: 服务端未接受 upload_req" << std::endl;
+      return -4;
+    }
+    file_id = dl->file_id;
+    auto sock = TcpSocket::connect(dl->ip, dl->port);
+    if(!sock || !dataHandshake(sock, dl->token)) {
+      std::cerr << "[FileService] 上传失败: 数据连接/握手失败 " << dl->ip << ":" << dl->port << std::endl;
+      return -5;
+    }
+
+    int rfd = open(full_path.c_str(), O_RDONLY);
+    if(rfd < 0) {
+      std::cerr << "[FileService] 上传失败: 无法打开文件: " << full_path << std::endl;
+      return -1;
+    }
+    if(lseek(rfd,(off_t)dl->offset,SEEK_SET) == (off_t)-1) {
+      close(rfd);
+      std::cerr << "[FileService] 上传失败: lseek 定位失败" << std::endl;
+      return -1;
+    }
+    uint64_t offset = dl->offset;
+    char buf[FILE_CHUNK];
+    bool ok = true;
+    while(offset < file_size) {
+      ssize_t n = read(rfd, buf, sizeof(buf));
+      if(n <= 0) { ok = false; break; }
+      if(sock->sendRaw(buf,(size_t)n) != 0) {
+        ok = false;
+        break;
+      }
+      offset += (uint64_t)n;
+      if(progress) progress(offset,file_size);
+    }
+    close(rfd);
+    if(ok && offset == file_size) {
+      std::cout << "[FileService] 上传完成: " << file_name << " (" << file_size << " 字节)" << std::endl;
+      return 0;
+    }
+    std::cerr << "[FileService] 上传中断于 " << offset << "/" << file_size << "，尝试续传..." << std::endl;
+  }
+  return -6;
+}
+
+int FileService::downloadFile(const std::string& file_id,const std::string& save_path,ProgressBack progress,uint64_t resume_offset) {
+  std::string fid = file_id;
+  for(int i = 0; i < 3;i++) {
+    nlohmann::json data = {
+      {"file_id",fid},
+      {"offset",resume_offset}
+    };
+    auto dl = makeLink("download_req",data);
+    if(!dl) return -1;
+    fid = dl->file_id;
+
+    auto sock = TcpSocket::connect(dl->ip,dl->port);
+    if(!sock || !dataHandshake(sock,dl->token)) return -1;
+
+    int wfd = open(save_path.c_str(), O_WRONLY | O_CREAT, 0644);
+    if(wfd < 0) return -1;
+    uint64_t offset = dl->offset;
+    uint64_t total = dl->file_size;
+    if(lseek(wfd,(off_t)offset,SEEK_SET) == (off_t)-1) {
+      close(wfd);
+      return -1;
+    }
+    char buf[FILE_CHUNK];
+    bool ok = true;
+    while(offset < total) {
+      int n = sock->recvRaw(buf,sizeof(buf));
+      if(n <= 0) {
+        ok = false;
+        break;
+      }
+      if(write(wfd,buf,(size_t)n) != (ssize_t)n) {
+        ok = false;
+        break;
+      }
+      offset += (uint64_t)n;
+      if(progress) progress(offset,total);
+    }
+    close(wfd);
+    if(ok && offset == total) return 0;
+    resume_offset = offset;
+  }
+  return -1;
+}
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "shared.h"
+#include "context.h"
 #include "socket.h"
 #include <unordered_map>
 #include <vector>
@@ -15,78 +16,7 @@
 #include <atomic>
 #include <ctime>
 
-// 可以让 ClientContext 在数据更新时提供一个简单的通知机制
-class ClientContext {
-public:
-  // 用户本人
-  void setSelf(const User& user);
-  User getSelf();
-  // 好友相关
-  void setFriendList(const std::vector<User>& list);
-  std::vector<User> getFriendList();
-  bool hasFriend(int uid);
-  std::optional<User> getFriend(int uid);
-  void addFriend(const User& user);
-  void addFriendRequest(const User& user);
-  void delFriend(int uid);
-  void setFriendRequests(const std::vector<User>& list);
-  std::vector<User> getFriendRequests();
 
-  void addBlock(int uid);
-  void unBlock(int uid);
-  bool isBlocked(int uid);
-  void setBlockList(const std::vector<int>& list);
-  std::vector<int> getBlockList();
-  // 聊天相关
-  void addMessage(const Message& msg);
-  std::vector<Message> getMessage(int id);
-  void setMessage(int uid,const std::vector<Message>& msgs);
-  void loadMoreMessages(int uid,const std::vector<Message>& msgs);
-  void updateLastSyncTime(uint64_t t);
-  uint64_t getLastSyncTime();
-  bool isMessageRepeat(const std::string& msg_id);
-  void markMessageReceived(const std::string& msg_id);
-  // 群组相关
-    // 群组列表
-  void setGroupList(const std::vector<GroupInfo>& list);
-  std::vector<GroupInfo> getGroupList();
-  void addGroup(const GroupInfo& g);
-  void removeGroup(int gid);
-    // 群成员
-  void setGroupMembers(int gid,const std::vector<GroupMember>& members);
-  std::vector<GroupMember> getGroupAllMembers(int gid);
-  void addGroupMember(int gid,const GroupMember& m);
-  void removeGroupMember(int gid,int uid);
-  std::optional<GroupMember> getGroupMember(int gid,int uid);
-    // 本人在群内的信息
-  void setSelfPermission(int gid,int perm);
-  int getSelfPermission(int gid);
-  void setSelfRemind(int gid,int remind);
-  int getSelfRemind(int gid);
-  // 本地信息存储相关
-  std::unordered_map<int,std::vector<Message>> getAllMessages() const;
-  void loadMessages(const std::unordered_map<int,std::vector<Message>>& allMsgs);
-
-private:
-  // 用户本人
-  User self_;
-  // 好友相关
-  std::unordered_map<int,User> friends_;
-  std::unordered_map<int,User> friendRequests_;
-  std::unordered_set<int> blocked_;
-  // 聊天相关
-  std::unordered_map<int,std::vector<Message>> msgs_;
-  uint64_t last_sync_time_ = 0;
-  std::unordered_set<std::string> known_msg_;
-  // 群组相关
-  std::unordered_map<int,GroupInfo> groupMap_; // gid -> 信息
-  std::vector<int> groupSort_; // gid排序
-  std::unordered_map<int,std::vector<GroupMember>> groupMembers_; // gid -> 成员列表
-  std::unordered_map<int,int> usrPermission_; // gid -> 用户的权限
-  std::unordered_map<int,int> usrRemind_; // gid -> 用户的提醒设置
-
-  mutable std::mutex mtx_;
-};
 
 class ChatStorage {
 public:
@@ -136,7 +66,7 @@ public:
   bool login(const std::string& username,const std::string& password);
   bool regis(const std::string& username,const std::string& password);
   bool logout(); //登出
-  bool delauth(); //注销账户
+  bool delauth(const std::string& password); //注销账户
 
 private:
   ClientNetwork& network_;
@@ -194,6 +124,7 @@ public:
   int listMyGroups(); // 获取我加入的群列表，更新 ctx
   int listMembers(int gid); // 获取某群成员，更新 ctx
   int listJoinRequests(int gid,std::vector<User>& out_requests); // 获取某群申请列表
+  int syncJoinRequests(); // 登录时同步管理的所有群的入群申请
 
   void handlePush(const nlohmann::json& push);
 
@@ -204,8 +135,22 @@ private:
 
 class FileService {
 public:
+  using ProgressBack = std::function<void(uint64_t,uint64_t)>;
   FileService(ClientNetwork& network,ClientContext& ctx);
+  int uploadFile(const std::string& path,const std::string& chat_type,int target_id,const std::string& resume_file_id,ProgressBack progress,const std::string& file_name = "");
+  int downloadFile(const std::string& file_id,const std::string& save_path,ProgressBack progress,uint64_t resume_offset = 0);
 
+private:
+  struct DataLink {
+    std::string ip;
+    unsigned short port;
+    std::string token;
+    std::string file_id;
+    uint64_t offset;
+    uint64_t file_size;
+  };
+  std::optional<DataLink> makeLink(const std::string& action,const nlohmann::json& data);
+  bool dataHandshake(const std::shared_ptr<TcpSocket>& sock,const std::string& token);
 private:
   ClientNetwork& network_;
   ClientContext& ctx_;
