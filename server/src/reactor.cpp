@@ -32,9 +32,9 @@ namespace netNonBlocking {
     }
   }
 
-  int accept(int lfd) {
+  int acceptN(int lfd) {
     while(true) {
-      int fd = accept(lfd);
+      int fd = accept(lfd,nullptr,nullptr);
       if(fd > 0) return fd;
       if(errno == EINTR) continue;
       return -1;
@@ -122,8 +122,13 @@ void EventLoop::loop() {
       if(errno == EINTR) continue;
       break;
     }
+if(n > 0) std::cout << "[loop " << std::this_thread::get_id() << "] 醒来 n=" << n << std::endl;
     for(int i = 0;i < n;i++) {
       auto* ch = static_cast<Channel*>(read_events_[i].data.ptr);
+std::cout << "    -> fd=" << ch->fd()
+<< (read_events_[i].events & EPOLLIN  ? " [IN]"  : "")
+<< (read_events_[i].events & EPOLLOUT ? " [OUT]" : "")
+<< (read_events_[i].events & EPOLLHUP ? " [HUP]" : "") << std::endl;
       ch->handleEvent(read_events_[i].events);
     }
     runTask();
@@ -226,6 +231,7 @@ void Acceptor::handleRead() {
       if(errno == EAGAIN || errno == EWOULDBLOCK) break;
       break;
     }
+std::cout << "[acceptor] accept 到 fd=" << fd << std::endl;
     if(new_con_cb_) new_con_cb_(fd);
   }
 }
@@ -262,4 +268,121 @@ EventLoop* EventLoopPool::nextLoop() {
   EventLoop* loop = sub_loops_[next_];
   next_ = (next_ + 1) % (int)sub_loops_.size();
   return loop;
+}
+
+
+Connection::Connection(EventLoop* loop,int fd)
+  : loop_(loop),fd_(fd),channel_(nullptr)
+{
+  channel_ = new Channel(loop_,fd_);
+  channel_->enableRead();
+  channel_->setReadBack([this] { handleRead(); });
+  channel_->setWriteBack([this] { handleWrite(); });
+}
+
+Connection::~Connection() {
+  if(channel_) {
+    channel_->remove();
+    delete channel_;
+  }
+  if(fd_ >= 0) close(fd_);
+}
+
+void Connection::send(const std::string& msg) {
+  if(closed_) return;
+  std::string frame = netNonBlocking::encodeFrame(msg);
+  if(send_queue_.empty()) {
+    ssize_t n = netNonBlocking::writeN(fd_,frame.data(),frame.size());
+    if(n == (ssize_t)frame.size()) return;
+    if(n > 0) {
+      send_queue_.push_back(frame.substr(n));
+    } else {
+      if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+        send_queue_.push_back(frame);
+      } else {
+        handleClose();
+        return;
+      }
+    }
+  } else {
+    send_queue_.push_back(frame);
+  }
+  if(!send_queue_.empty()) channel_->enableWrite();
+}
+
+void Connection::setMessageCallback(std::function<void(const std::string&)> cb) {
+  message_cb_ = std::move(cb);
+}
+
+void Connection::setCloseCallback(std::function<void()> cb) {
+  close_cb_ = std::move(cb);
+}
+
+void Connection::handleWrite() {
+  while(!send_queue_.empty()) {
+    auto& front = send_queue_.front();
+    ssize_t n = netNonBlocking::writeN(fd_,front.data(),front.size());
+    if(n > 0) {
+      front.erase(0,n);
+      if(front.empty()) send_queue_.pop_front();
+    } else {
+      if(errno == EAGAIN || errno == EWOULDBLOCK) break;
+      if(errno == EINTR) continue;
+      handleClose();
+      return;
+    }
+  }
+  if(send_queue_.empty()) channel_->disableWrite();
+}
+
+std::string Connection::localIp() const {
+  sockaddr_in addr;
+  socklen_t len = sizeof(addr);
+  if(fd_ < 0) return "127.0.0.1";
+  if(getsockname(fd_,(sockaddr*)&addr,&len) == -1) return "127.0.0.1";
+  char buf[INET_ADDRSTRLEN];
+  if(inet_ntop(AF_INET,&addr.sin_addr,buf,sizeof(buf)) == nullptr) return "127.0.0.1";
+  return buf;
+}
+
+void Connection::handleRead() {
+  char buf[65536];
+  while(true) {
+    ssize_t n = netNonBlocking::readN(fd_,buf,sizeof(buf));
+    if(n > 0) {
+      in_buf_.append(buf,n);
+      while(true) {
+        size_t consumed = 0;
+        std::string frame;
+        int r = netNonBlocking::tryTakeFrame(in_buf_,consumed,frame);
+        if(r == 0) break;
+        if(r < 0) {
+          handleClose();
+          return;
+        }
+        in_buf_.erase(0,consumed);
+std::cout << "[conn " << fd_ << "] 收到帧: " << frame << std::endl;
+        if(message_cb_) message_cb_(frame);
+      }
+    } else if(n == 0) {
+      handleClose();
+      return;
+    } else {
+      if(errno == EAGAIN || errno == EWOULDBLOCK) break;
+      if(errno == EINTR) continue;
+      handleClose();
+      return;
+    }
+  }
+}
+
+void Connection::handleClose() {
+  if(closed_) return;
+  closed_ = true;
+  channel_->remove();
+  if(close_cb_) close_cb_();
+  close(fd_);
+  fd_ = -1;
+  delete channel_;
+  channel_ = nullptr;
 }
