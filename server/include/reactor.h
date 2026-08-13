@@ -16,6 +16,7 @@
 #include <iostream>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <deque>
 
 namespace netNonBlocking {
   constexpr uint32_t MaxFrameSize = 100 * 1024 * 1024;
@@ -23,7 +24,7 @@ namespace netNonBlocking {
   bool set(int fd);
   ssize_t readN(int fd,void* buf,size_t len);
   ssize_t writeN(int fd,const void* buf,size_t len);
-  int accept(int lfd);
+  int acceptN(int lfd);
 
   std::string encodeFrame(const std::string& body);
   int tryTakeFrame(const std::string& in,size_t& consumed,std::string& frame);
@@ -132,4 +133,32 @@ private:
   int next_;
   std::vector<EventLoop*> sub_loops_;
   std::vector<std::thread> threads_;
+};
+
+class Connection {
+public:
+  Connection(EventLoop* loop,int fd);
+  ~Connection();
+  EventLoop* loop() { return loop_; }
+  void send(const std::string& msg);
+
+  void setMessageCallback(std::function<void(const std::string&)> cb);
+  void setCloseCallback(std::function<void()> cb);
+  void handleClose();
+  
+  std::string localIp() const;
+
+private:
+  void handleWrite();
+  void handleRead();
+
+private:
+  int fd_;
+  EventLoop* loop_;
+  Channel* channel_;
+  std::string in_buf_;
+  bool closed_ = false;
+  std::deque<std::string> send_queue_;
+  std::function<void()> close_cb_;
+  std::function<void(const std::string&)> message_cb_;
 };
