@@ -803,24 +803,29 @@ bool GroupManager::save(const std::string& path) {
   return true;
 }
 
-void SessionManager::unbindUser(int user_id) {
+void SessionManager::bindUser(int user_id,std::shared_ptr<Connection> conn) {
   std::lock_guard<std::mutex> lock(mtx_);
-  user_to_sock_.erase(user_id);
+  user_to_conn_[user_id] = std::move(conn);
 }
 
-void SessionManager::bindUser(int user_id,std::shared_ptr<TcpSocket> sock) {
+void SessionManager::unbindUser(int user_id) {
   std::lock_guard<std::mutex> lock(mtx_);
-  user_to_sock_[user_id] = std::move(sock);
+  user_to_conn_.erase(user_id);
 }
 
 bool SessionManager::isOnline(int uid) {
   std::lock_guard lock(mtx_);
-  return user_to_sock_.count(uid);
+  return user_to_conn_.count(uid);
 }
 
 bool SessionManager::sendChatTo(int to_uid,const Message& msg) {
-  auto sock = getSock(to_uid);
-  if(!sock) return -1;
+  std::shared_ptr<Connection> conn;
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    auto it = user_to_conn_.find(to_uid);
+    if(it == user_to_conn_.end()) return false;
+    conn = it->second;
+  }
   nlohmann::json push;
   push["msg_type"] = "push";
   push["type"] = "chat";
@@ -831,26 +836,32 @@ bool SessionManager::sendChatTo(int to_uid,const Message& msg) {
     push["action"] = "group_chat";
   }
   push["data"] = msg;
-  if(sock->sendMsg(push.dump()) != NetResult::OK) {
-    return -1;
-  }
-  return 0;
+  std::string p = push.dump();
+
+  auto loop = conn->loop();
+  loop->runInLoop([conn,p] { conn->send(p); });
+  return true;
 }
 
 bool SessionManager::sendPushTo(int to_uid,nlohmann::json& push) {
-  auto sock = getSock(to_uid);
-  if(!sock) return -1;
-  push["msg_type"] = "push";
-  if(sock->sendMsg(push.dump()) != NetResult::OK) {
-    return -1;
+  std::shared_ptr<Connection> conn;
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    auto it = user_to_conn_.find(to_uid);
+    if(it == user_to_conn_.end()) return false;
+    conn = it->second;
   }
-  return 0;
+  push["msg_type"] = "push";
+  std::string p = push.dump();
+  auto loop = conn->loop();
+  loop->runInLoop([conn, p] { conn->send(p); });
+  return true;
 }
 
-std::shared_ptr<TcpSocket> SessionManager::getSock(int user_id) {
+std::shared_ptr<Connection> SessionManager::getConn(int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
-  auto it = user_to_sock_.find(user_id);
-  if(it == user_to_sock_.end()) return nullptr;
+  auto it = user_to_conn_.find(uid);
+  if(it == user_to_conn_.end()) return nullptr;
   return it->second;
 }
 
