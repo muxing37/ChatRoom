@@ -1,6 +1,7 @@
 #pragma once
 #include "socket.h"
 #include "shared.h"
+#include "reactor.h"
 #include <fstream>
 #include <termios.h>
 #include <pthread.h>
@@ -179,15 +180,16 @@ private:
 
 class SessionManager {
 public:
-  void bindUser(int user_id,std::shared_ptr<TcpSocket> sock);
+  void bindUser(int user_id,std::shared_ptr<Connection> conn);
   void unbindUser(int user_id);
-  std::shared_ptr<TcpSocket> getSock(int user_id);
-  
+  std::shared_ptr<Connection> getConn(int uid);
+
   bool isOnline(int uid);
+
   bool sendChatTo(int uid,const Message& msg);
   bool sendPushTo(int uid,nlohmann::json& push);
 
 private:
-  std::unordered_map<int,std::shared_ptr<TcpSocket>> user_to_sock_;
+  std::unordered_map<int,std::shared_ptr<Connection>> user_to_conn_;
   std::mutex mtx_;
 };
