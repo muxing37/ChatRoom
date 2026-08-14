@@ -1,4 +1,5 @@
 #include "reactor.h"
+#include "shared.h"
 
 namespace netNonBlocking {  
   bool set(int fd) {
@@ -95,9 +96,11 @@ void Channel::handleEvent(uint32_t events) {
 EventLoop::EventLoop() : 
   epoll_fd_(epoll_create1(EPOLL_CLOEXEC)),
   wake_fd_(eventfd(0,EFD_NONBLOCK | EFD_CLOEXEC)),
+  timer_fd_(-1),
   thread_id_(std::this_thread::get_id()),
   quit_(false),
-  wake_channel_(nullptr)
+  wake_channel_(nullptr),
+  timer_channel_(nullptr)
 {
   read_events_.resize(1024);
   wake_channel_ = new Channel(this,wake_fd_);
@@ -110,8 +113,36 @@ EventLoop::~EventLoop() {
     wake_channel_->remove();
     delete wake_channel_;
   }
+  if(timer_channel_) {
+    timer_channel_->remove();
+    delete timer_channel_;
+  }
   close(wake_fd_);
+  if(timer_fd_ >= 0) close(timer_fd_);
   close(epoll_fd_);
+}
+
+void EventLoop::runEvery(int ms,std::function<void()> cb) {
+  timer_cb_ = std::move(cb);
+  if(timer_fd_ < 0) {
+    timer_fd_ = timerfd_create(CLOCK_MONOTONIC,TFD_NONBLOCK | TFD_CLOEXEC);
+    itimerspec its{};
+    its.it_value.tv_sec = ms / 1000;
+    its.it_value.tv_nsec = (ms % 1000) * 1000000;
+    its.it_interval.tv_sec = ms / 1000;
+    its.it_interval.tv_nsec = (ms % 1000) * 1000000;
+    timerfd_settime(timer_fd_,0,&its,nullptr);
+
+    timer_channel_ = new Channel(this,timer_fd_);
+    timer_channel_->setReadBack([this] { handleTimer(); });
+    timer_channel_->enableRead();
+  }
+}
+
+void EventLoop::handleTimer() {
+  uint64_t expiration = 0;
+  read(timer_fd_,&expiration,sizeof(expiration));
+  if(timer_cb_) timer_cb_;
 }
 
 void EventLoop::loop() {
@@ -263,6 +294,12 @@ void EventLoopPool::start() {
   }
 }
 
+void EventLoopPool::runEveryOnSubLoops(int ms,std::function<void(EventLoop*)> cb) {
+  for(auto* loop : sub_loops_) {
+    loop->runEvery(ms,[loop,cb] { cb(loop); });
+  }
+}
+
 EventLoop* EventLoopPool::nextLoop() {
   if(sub_loops_.empty()) return main_loop_;
   EventLoop* loop = sub_loops_[next_];
@@ -272,12 +309,13 @@ EventLoop* EventLoopPool::nextLoop() {
 
 
 Connection::Connection(EventLoop* loop,int fd)
-  : loop_(loop),fd_(fd),channel_(nullptr)
+  : loop_(loop),fd_(fd),channel_(nullptr),last_active_ms_(now_ms())
 {
   channel_ = new Channel(loop_,fd_);
   channel_->enableRead();
   channel_->setReadBack([this] { handleRead(); });
   channel_->setWriteBack([this] { handleWrite(); });
+  loop_->addConn(this);
 }
 
 Connection::~Connection() {
@@ -286,6 +324,7 @@ Connection::~Connection() {
     delete channel_;
   }
   if(fd_ >= 0) close(fd_);
+  if(loop_) loop_->removeConn(this);
 }
 
 void Connection::send(const std::string& msg) {
@@ -350,6 +389,7 @@ void Connection::handleRead() {
   while(true) {
     ssize_t n = netNonBlocking::readN(fd_,buf,sizeof(buf));
     if(n > 0) {
+      last_active_ms_ = now_ms();
       in_buf_.append(buf,n);
       while(true) {
         size_t consumed = 0;

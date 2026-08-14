@@ -127,6 +127,13 @@ void ClientNetwork::dispatch(const json& j) {
     pushReply(j);
   }
   if(type == "push") {
+    if(j.value("type","") == "heartbeat") {
+      nlohmann::json pong;
+      pong["type"] = "heartbeat";
+      pong["action"] = "pong";
+      send(pong.dump());
+      return;
+    }
     if(pushHandler_) pushHandler_(j);
   }
 }

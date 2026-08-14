@@ -17,6 +17,27 @@ constexpr size_t FILE_CHUNK = 1024 * 1024; // 数据块
 constexpr int DATA_ACCEPT_TIMEOUT_MS = 15000; // 连接超时
 constexpr int64_t MAX_FILE_SIZE = 2LL * 1024 * 1024 * 1024; // 单文件大小上限（QQ 4GB,微信 1GB）
 
+constexpr uint64_t HEARTBEAT_CHECK_MS = 5000;
+constexpr uint64_t HEARTBEAT_PING_MS = 30000;
+constexpr uint64_t HEARTBEAT_TIMEOUT_MS = 65000;
+
+void checkHeartbeat(EventLoop* loop) {
+  uint64_t now = now_ms();
+  nlohmann::json ping;
+  ping["msg_type"] = "push";
+  ping["type"] = "heartbeat";
+  ping["action"] = "ping";
+  ping["time"] = now;
+  for(auto* conn : loop->conns()) {
+    if(now - conn->lastActive() > HEARTBEAT_TIMEOUT_MS) {
+      conn->handleClose();
+    } else if(now - conn->lastPingMs() > HEARTBEAT_PING_MS) {
+      conn->send(ping.dump());
+      conn->updateLastPing(now);
+    }
+  }
+}
+
 UsrManager usrManager;
 SessionManager sessionManager;
 FriendManager friendManager;
@@ -1199,6 +1220,7 @@ int start_server() {
 
   EventLoop main_loop;
   EventLoopPool pool(&main_loop);
+  pool.runEveryOnSubLoops(HEARTBEAT_CHECK_MS,checkHeartbeat);
   pool.start();
 
   Acceptor acceptor(&main_loop,2100);

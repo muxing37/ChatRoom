@@ -17,6 +17,8 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <deque>
+#include <sys/timerfd.h>
+#include <unordered_set>
 
 namespace netNonBlocking {
   constexpr uint32_t MaxFrameSize = 100 * 1024 * 1024;
@@ -31,11 +33,17 @@ namespace netNonBlocking {
 }
 
 class Channel;
+class Connection;
 
 class EventLoop {
 public:
   EventLoop();
   ~EventLoop();
+
+  void runEvery(int ms,std::function<void()> cb);
+  void addConn(Connection* c) { conns_.insert(c); }
+  void removeConn(Connection* c) { conns_.erase(c); }
+  const std::unordered_set<Connection*>& conns() { return conns_; }
 
   void resetThreadId() { thread_id_ = std::this_thread::get_id(); }
 
@@ -52,11 +60,16 @@ public:
   }
 
 private:
+  void handleTimer();
   void wakeup();
   void handleWakeup();
   void runTask();
 
 private:
+  int timer_fd_;
+  Channel* timer_channel_;
+  std::function<void()> timer_cb_;
+  std::unordered_set<Connection*> conns_;
   int epoll_fd_;
   int wake_fd_;
   std::thread::id thread_id_;
@@ -127,6 +140,7 @@ public:
 
   void start();
   EventLoop* nextLoop();
+  void runEveryOnSubLoops(int ms,std::function<void(EventLoop*)> cb);
 
 private:
   EventLoop* main_loop_;
@@ -148,11 +162,17 @@ public:
   
   std::string localIp() const;
 
+  uint64_t lastActive() { return last_active_ms_; }
+  uint64_t lastPingMs() { return last_ping_ms_; }
+  void updateLastPing(uint64_t t) { last_ping_ms_ = t; }
+
 private:
   void handleWrite();
   void handleRead();
 
 private:
+  uint64_t last_active_ms_ = 0; // 上次收到数据的时间
+  uint64_t last_ping_ms_ = 0; // 上次发 ping 的时间
   int fd_;
   EventLoop* loop_;
   Channel* channel_;
