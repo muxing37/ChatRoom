@@ -258,29 +258,19 @@ void FileSession::notifyFileMessage(const std::string& file_id) {
   }
 }
 
-class TcpServer {
-public:
-  TcpServer();
-  ~TcpServer();
-
-  bool setListen(unsigned short port);
-  std::shared_ptr<TcpSocket> acceptConn();
-
-private:
-  int listenfd_;
-};
-
 class Session {
 public:
-  Session(std::shared_ptr<TcpSocket> sock) : ctrlSock_(std::move(sock)) {}
+  Session(std::shared_ptr<Connection> conn) : conn_(std::move(conn)) {}
 
-  void start();
+  void onMessage(const std::string& frame);
+  void onClose();
 
 private:
   bool returnReply(const nlohmann::json& req,int status,nlohmann::json& reply);
   void friendOnPush();
   void friendOffPush();
-  void authServer();
+  bool handleAuth(const nlohmann::json& j); // 处理登录/注册
+  void handleUserAction(const nlohmann::json& j); // 处理登出/注销
   void friendSever(nlohmann::json j);
   void chatServer(nlohmann::json j);
   void groupServer(nlohmann::json j);
@@ -288,45 +278,12 @@ private:
 
 private:
   User linked_usr_;
-  std::shared_ptr<TcpSocket> ctrlSock_;
+  bool authed_ = false;
+  std::shared_ptr<Connection> conn_;
 };
 
-TcpServer::TcpServer()
-  : listenfd_(socket(AF_INET, SOCK_STREAM, 0)) {}
-
-TcpServer::~TcpServer() {
-  if (listenfd_ != -1) {
-    close(listenfd_);
-  }
-}
-
-bool TcpServer::setListen(unsigned short port) {
-  sockaddr_in addr;
-  memset(&addr,0,sizeof(addr));
-  addr.sin_family=AF_INET;
-  addr.sin_port=htons(port);
-  addr.sin_addr.s_addr=INADDR_ANY;
-  if(bind(listenfd_,(sockaddr*)&addr,sizeof(addr))==-1) {
-    return false;
-  }
-
-  if(listen(listenfd_,SOMAXCONN)==-1) {
-    return false;
-  }
-  return true;
-}
-
-std::shared_ptr<TcpSocket> TcpServer::acceptConn() {
-  sockaddr_in cliaddr;
-  socklen_t len = sizeof(cliaddr);
-  int fd = accept(listenfd_,(sockaddr*)&cliaddr,&len);
-  std::cout << fd << std::endl;
-  if(fd < 0) {
-    return nullptr;
-  }
-
-  return std::make_unique<TcpSocket>(fd);
-}
+static std::unordered_map<int,std::shared_ptr<Session>> sessions; // fd -> session
+static std::mutex sessions_mtx;
 
 bool Session::returnReply(const nlohmann::json& req,int status,nlohmann::json& reply) {
   reply["msg_type"] = "reply";
@@ -334,82 +291,110 @@ bool Session::returnReply(const nlohmann::json& req,int status,nlohmann::json& r
   reply["status"] = status;
   reply["time"] = now_ms();
 
-  ctrlSock_->sendMsg(reply.dump());
+  conn_->send(reply.dump());
   return true;
 }
 
-void Session::authServer() {
+bool Session::handleAuth(const nlohmann::json& j) {
+  nlohmann::json reply;
+  int uid;
   std::optional<User> usr;
-  while(true) {
-    std::string res;
-    if(ctrlSock_->recvMsg(res)!=NetResult::OK) return;
-    if(res.empty()) continue;
-
-    nlohmann::json j;
-    try {
-      j = nlohmann::json::parse(res);
-    } catch(...) {
-      continue;
-    }
-
-    if(j["type"]!="user") {
-      nlohmann::json reply;
-      reply["error"]="invalid type";
-      returnReply(j,1,reply);
-      continue;
-    }
-    nlohmann::json reply;
-    int uid;
-    try {
-      if(j["action"]=="register") {
-        std::string username = j["data"]["username"];
-        std::string password = j["data"]["password"];
-        if(usrManager.isExist(username)) {
-          reply["error"] ="username exists";
-          returnReply(j,1,reply);
-          continue;
-        }
-        uid=get_uid.get();
-        if(!usrManager.regis(username,password,uid)) {
-          reply["error"] = "register failed";
-          returnReply(j,1,reply);
-          continue;
-        }
-        usr = usrManager.getUser(uid);
-        usr->online = true;
-        usrManager.save(USRDATA);
-        reply["data"]={
-          {"uid",uid},
-          {"username",username}
-        };
-        returnReply(j,0,reply);
-        break;
-      } else if(j["action"] == "login") {
-        std::string username = j["data"]["username"];
-        std::string password = j["data"]["password"];
-        if(!usrManager.login(username,password,uid)) {
-          reply["error"] ="username or password wrong";
-          returnReply(j,1,reply);
-          continue;
-        }
-        usr = usrManager.getUser(uid);
-        usr->online = true;
-        reply["data"]={
-          {"uid",uid},
-          {"username",username}
-        };
-        returnReply(j,0,reply);
-        break;
-      } else {
+  try {
+    if(j["action"]=="register") {
+      std::string username = j["data"]["username"];
+      std::string password = j["data"]["password"];
+      if(usrManager.isExist(username)) {
+        reply["error"] ="username exists";
         returnReply(j,1,reply);
+        return false;
       }
-    } catch(const std::exception& e) {
-      std::cerr << "[Server] auth 处理异常: " << e.what() << std::endl;
-      returnReply(j,-1,reply);
+      uid=get_uid.get();
+      if(!usrManager.regis(username,password,uid)) {
+        reply["error"] = "register failed";
+        returnReply(j,1,reply);
+        return false;
+      }
+      usr = usrManager.getUser(uid);
+      usr->online = true;
+      usrManager.save(USRDATA);
+      reply["data"]={
+        {"uid",uid},
+        {"username",username}
+      };
+      returnReply(j,0,reply);
+      linked_usr_.username = usr->username;
+      linked_usr_.uid = usr->uid;
+      // 登录时间
+      authed_ = true;
+      return true;
+    } else if(j["action"] == "login") {
+      std::string username = j["data"]["username"];
+      std::string password = j["data"]["password"];
+      if(!usrManager.login(username,password,uid)) {
+        reply["error"] ="username or password wrong";
+        returnReply(j,1,reply);
+        return false;
+      }
+      usr = usrManager.getUser(uid);
+      usr->online = true;
+      reply["data"]={
+        {"uid",uid},
+        {"username",username}
+      };
+      returnReply(j,0,reply);
+      linked_usr_.username = usr->username;
+      linked_usr_.uid = usr->uid;
+      authed_ = true;
+      return true;
+    } else {
+      returnReply(j,1,reply);
     }
+  } catch(const std::exception& e) {
+    std::cerr << "[Server] auth 处理异常: " << e.what() << std::endl;
+    returnReply(j,-1,reply);
   }
-  linked_usr_.username = usr->username;
-  linked_usr_.uid = usr->uid;
+  return false;
+}
+
+void Session::handleUserAction(const nlohmann::json& j) {
+  try{
+    if(j["type"] == "user") {
+      if(j["action"] == "logout") {
+        friendOffPush();
+        sessionManager.unbindUser(linked_usr_.uid);
+        nlohmann::json reply;
+        returnReply(j,0,reply);
+        authed_ = false;
+        linked_usr_.uid = 0;
+        linked_usr_.username = "";
+        return;
+      }
+      if(j["action"] == "delete") {
+        int del_uid = linked_usr_.uid;
+        nlohmann::json reply;
+        if(del_uid != j["data"]["uid"]) {
+          returnReply(j,-1,reply);
+          return;
+        }
+        if(!usrManager.delUsr(del_uid,j["data"]["password"])) {
+          returnReply(j,-1,reply);
+          return;
+        }
+        friendOffPush();
+        friendManager.removeUsr(del_uid);
+        messageManager.removeUsr(del_uid);
+        groupManager.removeUser(del_uid);
+        sessionManager.unbindUser(del_uid);
+        returnReply(j,0,reply);
+        authed_ = false;
+        conn_->handleClose();
+        // ctrlSock_->closefd();
+        return;
+      }
+    }
+  } catch(const std::exception& e) {
+    std::cerr << "[Server] 处理消息异常(已跳过): " << e.what() << std::endl;
+  }
 }
 
 void Session::friendSever(nlohmann::json j) {
@@ -1016,7 +1001,7 @@ void Session::fileServer(nlohmann::json j) {
     transferRegis.add(t);
 
     reply["data"] = {
-      {"ip",ctrlSock_->localIp()},
+      {"ip",conn_->localIp()},
       {"port",port},
       {"token",token},
       {"file_id",file_id},
@@ -1088,7 +1073,7 @@ void Session::fileServer(nlohmann::json j) {
     transferRegis.add(t);
 
     reply["data"] = {
-      {"ip",ctrlSock_->localIp()},
+      {"ip",conn_->localIp()},
       {"port",port},
       {"token",token},
       {"file_id",file_id},
@@ -1143,80 +1128,62 @@ void Session::friendOffPush() {
   }
 }
 
-void Session::start() {
-  std::string recv;
-  authServer();
-  sessionManager.bindUser(linked_usr_.uid,ctrlSock_);
-  friendOnPush();
-  while(true) {
-    if(ctrlSock_->recvMsg(recv) != NetResult::OK) {
-      std::cout << "[INFO] client disconnected or recv failed\n";
-      break;
-    }
-    if(recv.empty()) continue;
-
-    nlohmann::json j;
-    try {
-      j = nlohmann::json::parse(recv);
-    } catch(...) {
-      continue;
-    }
-
-    try {
-      if(j["type"] == "friend") {
-        friendSever(j);
-        continue;
-      }
-      if(j["type"] == "chat") {
-        chatServer(j);
-        continue;
-      }
-      if(j["type"] == "group") {
-        groupServer(j);
-        continue;
-      }
-      if(j["type"] == "file") {
-        fileServer(j);
-        continue;
-      }
-      if(j["type"] == "user") {
-        if(j["action"] == "logout") {
-          friendOffPush();
-          sessionManager.unbindUser(linked_usr_.uid);
-          nlohmann::json reply;
-          returnReply(j,0,reply);
-          authServer();
-          sessionManager.bindUser(linked_usr_.uid,ctrlSock_);
-          friendOnPush();
-          continue;
-        }
-        if(j["action"] == "delete") {
-          int del_uid = linked_usr_.uid;
-          nlohmann::json reply;
-          if(del_uid != j["data"]["uid"]) {
-            returnReply(j,-1,reply);
-            continue;
-          }
-          if(!usrManager.delUsr(del_uid,j["data"]["password"])) {
-            returnReply(j,-1,reply);
-            continue;
-          }
-          friendOffPush();
-          friendManager.removeUsr(del_uid);
-          messageManager.removeUsr(del_uid);
-          groupManager.removeUser(del_uid);
-          sessionManager.unbindUser(del_uid);
-          returnReply(j,0,reply);
-          ctrlSock_->closefd();
-          break;
-        }
-      }
-    } catch(const std::exception& e) {
-      std::cerr << "[Server] 处理消息异常(已跳过): " << e.what() << std::endl;
-    }
+void Session::onMessage(const std::string& frame) {
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(frame);
+  } catch(...) {
+    return;
   }
-  friendOffPush();
-  sessionManager.unbindUser(linked_usr_.uid);
+std::cout << "[session] action=" << j.value("action","?") << std::endl;
+  if(!authed_) {
+    std::string type = j.value("type",std::string());
+    if(type == "user") {
+      std::string action = j.value("action",std::string());
+      if(action == "register" || action == "login") {
+        if(handleAuth(j)) {
+          sessionManager.bindUser(linked_usr_.uid,conn_);
+          friendOnPush();
+        }
+      }
+    }
+    return;
+  }
+
+  try {
+    if(j["type"] == "friend") {
+      friendSever(j);
+      return;
+    }
+    if(j["type"] == "chat") {
+      chatServer(j);
+      return;
+    }
+    if(j["type"] == "group") {
+      groupServer(j);
+      return;
+    }
+    if(j["type"] == "file") {
+      fileServer(j);
+      return;
+    }
+    if(j["type"] == "user") {
+      handleUserAction(j);
+      return;
+    }
+  } catch(const std::exception& e) {
+    std::cerr << "[Server] 处理消息异常(已跳过): " << e.what() << std::endl;
+  }
+}
+
+void Session::onClose() {
+  if(authed_) {
+    friendOffPush();
+    sessionManager.unbindUser(linked_usr_.uid);
+    linked_usr_.uid = 0;
+    linked_usr_.username = "";
+    authed_ = false;
+  }
 }
 
 int start_server() {
@@ -1229,27 +1196,36 @@ int start_server() {
   int max_uid = usrManager.getMaxUid();
   get_uid.init(max_uid + 1);
   fileManager.init(); // 文件系统初始化
-  TcpServer server;
 
-  if(!server.setListen(2100)) {
-    std::cerr << "[FAIL] setListen failed\n";
-    return 1;
-  }
+  EventLoop main_loop;
+  EventLoopPool pool(&main_loop);
+  pool.start();
 
-  while(true) {
-    std::cout << "[INFO] server listening on port 2100...\n";
-    auto sock = server.acceptConn();
-    if(!sock) {
-      continue;
-    } else {
-      std::cout << "[PASS] client connected\n";
-    }
-    std::thread([sock = std::move(sock)]() 
-      mutable {
-        Session session(std::move(sock));
-        session.start();
+  Acceptor acceptor(&main_loop,2100);
+  acceptor.setNewConCallback([&pool](int fd) {
+    EventLoop* sub = pool.nextLoop();
+    sub->runInLoop([sub,fd] {
+      auto conn = std::make_shared<Connection>(sub,fd);
+      auto session = std::make_shared<Session>(conn);
+      std::weak_ptr<Session> weak = session;
+      conn->setMessageCallback([weak](const std::string& frame) {
+        if(auto s = weak.lock()) s->onMessage(frame);
+      });
+      conn->setCloseCallback([weak,sub,fd] {
+        if(auto s = weak.lock()) s->onClose();
+        sub->queueInLoop([weak,fd] {
+          std::lock_guard<std::mutex> lock(sessions_mtx);
+          sessions.erase(fd);
+        });
+      });
+      {
+        std::lock_guard<std::mutex> lock(sessions_mtx);
+        sessions[fd] = session;
       }
-    ).detach();
-  }
+    });
+  });
+
+  std::cout << "[INFO] server start listening\n";
+  main_loop.loop();
   return 0;
 }
