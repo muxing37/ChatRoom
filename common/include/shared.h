@@ -1,6 +1,5 @@
 #pragma once
 #include <iostream>
-#include <glog/logging.h>
 #include <string>
 #include <cstdint>
 #include <nlohmann/json.hpp>
@@ -84,7 +83,7 @@ struct Message {
     std::string content;
     uint64_t time;
 
-    int status;
+    int status; // 服务端无用，客户端用于标记已读消息
 };
 
 inline void to_json(nlohmann::json& j,const Message& msg) {

@@ -28,6 +28,7 @@ void ClientContext::reset() {
   usrPermission_.clear();
   usrRemind_.clear();
   groupJoinReqs_.clear();
+  last_logout_time_ = 0;
 }
 
 void ClientContext::setFriendOnline(int uid,bool online) {
@@ -132,8 +133,13 @@ std::vector<int> ClientContext::getBlockList() {
 }
 
 // 聊天相关
-void ClientContext::addMessage(const Message& msg) {
+void ClientContext::addMessage(Message& msg) {
   std::lock_guard<std::mutex> lock(mtx_);
+  if(msg.from_uid == self_.uid || msg.time <= last_logout_time_) {
+    msg.status = 1;
+  } else {
+    msg.status = 0;
+  }
   if(msg.chat_type == "private") {
     if(msg.from_uid == self_.uid) {
       msgs_[msg.target_id].push_back(msg);
@@ -144,6 +150,18 @@ void ClientContext::addMessage(const Message& msg) {
     msgs_[msg.target_id].push_back(msg);
   }
   local_db_.save(msg);
+}
+
+void ClientContext::markRead(int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = msgs_.find(uid);
+  if(it == msgs_.end()) return;
+  for(auto& m : it->second) {
+    if(m.status != 1) {
+      m.status = 1;
+      local_db_.save(m);
+    }
+  }
 }
 
 std::vector<Message> ClientContext::getMessage(int id) {
@@ -157,10 +175,6 @@ std::vector<Message> ClientContext::getMessage(int id) {
 void ClientContext::setMessage(int id,const std::vector<Message>& msgs) {
   std::lock_guard<std::mutex> lock(mtx_);
   msgs_[id] = msgs;
-}
-
-void ClientContext::loadMoreMessages(int uid,const std::vector<Message>& msgs) {
-
 }
 
 void ClientContext::updateLastSyncTime(uint64_t t) {

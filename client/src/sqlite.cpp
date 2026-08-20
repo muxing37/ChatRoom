@@ -1,5 +1,4 @@
 #include "sqlite.h"
-#include <glog/logging.h>
 
 bool LocalDb::init(const std::string& path) {
   std::lock_guard<std::mutex> lock(mtx_);
@@ -8,7 +7,7 @@ bool LocalDb::init(const std::string& path) {
     db_ = nullptr;
   }
   if(sqlite3_open(path.c_str(),&db_) != SQLITE_OK) {
-    LOG(ERROR) << "sqlite open failed: " << path << " " << sqlite3_errmsg(db_);
+
     if(db_) {
       sqlite3_close(db_);
       db_ = nullptr;
@@ -24,7 +23,7 @@ bool LocalDb::init(const std::string& path) {
     " msg_time INTEGER, status INTEGER);";
   char* err = nullptr;
   if(sqlite3_exec(db_,sql,nullptr,nullptr,&err) != SQLITE_OK) {
-    LOG(ERROR) << "sqlite create table failed: " << (err?err:"");
+
     sqlite3_free(err);
     sqlite3_close(db_);
     db_ = nullptr;
@@ -50,7 +49,7 @@ bool LocalDb::save(const Message& msg) {
     "(message_id,type,chat_type,from_uid,target_id,content,msg_time,status) "
     "VALUES (?,?,?,?,?,?,?,?)";
   if(sqlite3_prepare_v2(db_,sql,-1,&stmt,nullptr) != SQLITE_OK) {
-    LOG(ERROR) << "sqlite prepare failed: " << sqlite3_errmsg(db_);
+
     return false;
   }
   sqlite3_bind_text(stmt,1,msg.message_id.c_str(),-1,SQLITE_TRANSIENT);
@@ -63,7 +62,7 @@ bool LocalDb::save(const Message& msg) {
   sqlite3_bind_int64(stmt,8,msg.status);
   bool ok = sqlite3_step(stmt) == SQLITE_DONE;
   sqlite3_finalize(stmt);
-  if(!ok) LOG(ERROR) << "sqlite insert failed: " << sqlite3_errmsg(db_);
+
   return ok;
 }
 

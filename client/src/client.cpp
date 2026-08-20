@@ -56,20 +56,20 @@ void dispatchPush(
       groupService.handlePush(push);
     }
   } catch(const std::exception& e) {
-    LOG(ERROR) << "推送处理异常: " << e.what();
+
   }
 }
 
 int start_client(const std::string& ip,unsigned short port) {
   TcpClient client;
   if(!client.connectToHost(ip.c_str(),port)) {
-    LOG(ERROR) << "connectToHost failed";
+
     return 1;
   }
-  LOG(INFO) << "connected to server";
+
   auto sock = client.getSocket();
   if(!sock) {
-    LOG(ERROR) << "socket null";
+
     return 1;
   }
   std::string workpath=std::string(getenv("HOME")) + "/Download";

@@ -368,7 +368,7 @@ void Session::handleUserAction(const nlohmann::json& j) {
 }
 
 void Session::friendSever(nlohmann::json j) {
-  int self_uid = j["data"]["from_uid"];
+  int self_uid = linked_usr_.uid;
   nlohmann::json reply;
   reply["type"] = "reply";
   reply["action"] = j["action"];
@@ -486,6 +486,12 @@ void Session::friendSever(nlohmann::json j) {
 void Session::chatServer(nlohmann::json j) {
   if(j["action"] == "private_chat") {
     auto msg = j["data"].get<Message>();
+    if(msg.from_uid != linked_usr_.uid) {
+      nlohmann::json reply;
+      reply["error"] = "fake request";
+      returnReply(j,-1,reply);
+      return;
+    }
     if(!friendManager.isFriend(msg.from_uid, msg.target_id)) {
       nlohmann::json reply;
       reply["error"] = "not friends";
@@ -518,6 +524,12 @@ void Session::chatServer(nlohmann::json j) {
   }
   if(j["action"] == "group_chat") {
     auto msg = j["data"].get<Message>();
+    if(msg.from_uid != linked_usr_.uid) {
+      nlohmann::json reply;
+      reply["error"] = "fake request";
+      returnReply(j,-1,reply);
+      return;
+    }
     msg.chat_type = "group";
     msg.time = now_ms();
     msg.message_id = messageManager.getMsgId();
@@ -545,7 +557,7 @@ void Session::chatServer(nlohmann::json j) {
     returnReply(j,0,reply);
   }
   if(j["action"] == "history_all") {
-    int self_uid = j["data"]["from_uid"];
+    int self_uid = linked_usr_.uid;
     std::vector<Message> all = messageManager.getAllMsg(self_uid);
     nlohmann::json reply;
     reply["data"]["messages"] = all;
@@ -553,7 +565,7 @@ void Session::chatServer(nlohmann::json j) {
   }
   if(j["action"] == "sync_new") {
     uint64_t last_time = j["data"].value("last_time",0ULL);
-    int uid = j["data"]["from_uid"];
+    int uid = linked_usr_.uid;
     auto msgs = messageManager.getMessagesByTime(uid,last_time);
     nlohmann::json reply;
     reply["data"]["messages"] = msgs;
@@ -563,7 +575,7 @@ void Session::chatServer(nlohmann::json j) {
 
 void Session::groupServer(nlohmann::json j) {
   nlohmann::json reply;
-  int self_uid = j["data"]["from_uid"];
+  int self_uid = linked_usr_.uid;
   if(j["action"] == "create") {
     std::string name = j["data"]["group_name"];
     int gid;
@@ -841,7 +853,7 @@ void Session::groupServer(nlohmann::json j) {
 }
 
 void Session::fileServer(nlohmann::json j) {
-  int self_uid = j["data"]["from_uid"];
+  int self_uid = linked_usr_.uid;
   nlohmann::json reply;
   if(j["action"] == "upload_req") {
     std::string chat_type = j["data"].value("chat_type",std::string());
@@ -1088,6 +1100,9 @@ void Session::onMessage(const std::string& frame) {
   try {
     j = nlohmann::json::parse(frame);
   } catch(...) {
+    LOG(WARNING) << "无法解析的帧 uid=" << linked_usr_.uid 
+      << " size=" << frame.size() 
+      << " prefix=" << frame.substr(0, 64);
     return;
   }
   LOG(INFO) << "action=" << j.value("action","?");
@@ -1127,13 +1142,17 @@ void Session::onMessage(const std::string& frame) {
       return;
     }
   } catch(const std::exception& e) {
-    LOG(ERROR) << "异常消息：" << e.what();
+    LOG(ERROR) << "处理异常 uid=" << linked_usr_.uid
+      << " type=" << j.value("type","?")
+      << " action=" << j.value("action","?")
+      << " request_id=" << j.value("request_id","?")
+      << " err=" << e.what();
   }
 }
 
 void Session::onClose() {
   if(authed_) {
-    usrManager.updateLastLogout(linked_usr_.uid,now_ms());
+    usrManager.updateLastLogout(linked_usr_.uid,conn_->lastActive());
     friendOffPush();
     sessionManager.unbindUser(linked_usr_.uid);
     linked_usr_.uid = 0;

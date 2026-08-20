@@ -32,6 +32,7 @@ bool UsrManager::regis(const std::string& username,const std::string& password,i
   Account auth;
   auth.uid = uid;
   auth.username = username;
+  auth.last_logout_time = 0;
   auth.salt = getSalt();
   auth.password_hash = passwordHash(password,auth.salt);
   {

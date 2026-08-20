@@ -42,10 +42,10 @@ public:
   void setBlockList(const std::vector<int>& list);
   std::vector<int> getBlockList();
   // 聊天相关
-  void addMessage(const Message& msg);
+  void addMessage(Message& msg);
+  void markRead(int uid);
   std::vector<Message> getMessage(int id);
   void setMessage(int uid,const std::vector<Message>& msgs);
-  void loadMoreMessages(int uid,const std::vector<Message>& msgs);
   void updateLastSyncTime(uint64_t t);
   uint64_t getLastSyncTime();
   bool isMessageRepeat(const std::string& msg_id);

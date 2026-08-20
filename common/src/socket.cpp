@@ -96,7 +96,6 @@ NetResult TcpSocket::sendMsg(std::string msg) {
   std::lock_guard<std::mutex> lock(mtx_);
   uint32_t l=msg.size();
   uint32_t len=htonl(l);
-  // std::cout << "[SEND fd=" << sockfd_ << "] " << msg << std::endl;
   if(send_all(sockfd_,&len,sizeof(len))!=sizeof(len)) {
     return NetResult::SEND_ERROR;
   }
@@ -112,14 +111,11 @@ int recv_all(int fd,void *buf,size_t len) {
   char *p=(char*)buf;
   while(total<len) {
     int n=recv(fd,p+total,len-total,0);
-    // std::cout << "need=" << len << " total=" << total << " recv=" << n << std::endl;
     if(n>0) {
       total=total+n;
     } else if(n==0) {
-      std::cout << "peer closed\n";
       return total;
     } else {
-      std::cout << "errno=" << errno << std::endl;
       if(errno == EINTR) continue;
       return -1;
     }
@@ -132,7 +128,6 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
   uint32_t len=0;
 
   int ret=recv_all(sockfd_,&len,sizeof(len));
-  // std::cout << "raw len = " << len << std::endl;
   if(ret==0) return NetResult::RECV_ERROR;
   if(ret!=sizeof(len)) return NetResult::RECV_ERROR;
 
@@ -150,7 +145,5 @@ NetResult TcpSocket::recvMsg(std::string& msg) {
       return NetResult::RECV_ERROR;
     }
   }
-  // std::cout << "[RECV fd=" << sockfd_ << "] " << "\"" << msg << "\"" << std::endl;
-
   return NetResult::OK;
 }

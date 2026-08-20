@@ -149,6 +149,7 @@ bool AuthService::regis(const std::string& username,const std::string& password)
   if(reply["status"] != 0) {
     return false;
   }
+  ctx_.setLastLogoutTime(0);
   ctx_.reset(); // 清空上个会话的本地状态
   User user;
   user.uid = reply["data"]["uid"];
