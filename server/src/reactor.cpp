@@ -142,7 +142,7 @@ void EventLoop::runEvery(int ms,std::function<void()> cb) {
 void EventLoop::handleTimer() {
   uint64_t expiration = 0;
   read(timer_fd_,&expiration,sizeof(expiration));
-  if(timer_cb_) timer_cb_;
+  if(timer_cb_) timer_cb_();
 }
 
 void EventLoop::loop() {
@@ -153,13 +153,8 @@ void EventLoop::loop() {
       if(errno == EINTR) continue;
       break;
     }
-if(n > 0) std::cout << "[loop " << std::this_thread::get_id() << "] 醒来 n=" << n << std::endl;
     for(int i = 0;i < n;i++) {
       auto* ch = static_cast<Channel*>(read_events_[i].data.ptr);
-std::cout << "    -> fd=" << ch->fd()
-<< (read_events_[i].events & EPOLLIN  ? " [IN]"  : "")
-<< (read_events_[i].events & EPOLLOUT ? " [OUT]" : "")
-<< (read_events_[i].events & EPOLLHUP ? " [HUP]" : "") << std::endl;
       ch->handleEvent(read_events_[i].events);
     }
     runTask();
@@ -262,7 +257,7 @@ void Acceptor::handleRead() {
       if(errno == EAGAIN || errno == EWOULDBLOCK) break;
       break;
     }
-std::cout << "[acceptor] accept 到 fd=" << fd << std::endl;
+    LOG(INFO) << "accept fd = " << fd;
     if(new_con_cb_) new_con_cb_(fd);
   }
 }
@@ -401,7 +396,6 @@ void Connection::handleRead() {
           return;
         }
         in_buf_.erase(0,consumed);
-std::cout << "[conn " << fd_ << "] 收到帧: " << frame << std::endl;
         if(message_cb_) message_cb_(frame);
       }
     } else if(n == 0) {
@@ -419,10 +413,120 @@ std::cout << "[conn " << fd_ << "] 收到帧: " << frame << std::endl;
 void Connection::handleClose() {
   if(closed_) return;
   closed_ = true;
-  channel_->remove();
+  if(channel_) {
+    channel_->remove();
+    channel_->setReadBack(nullptr);
+    channel_->setWriteBack(nullptr);
+    channel_->setCloseBack(nullptr);
+  }
   if(close_cb_) close_cb_();
   close(fd_);
   fd_ = -1;
-  delete channel_;
-  channel_ = nullptr;
+  if(channel_) {
+    Channel* ch = channel_;
+    channel_ = nullptr;
+    loop_->queueInLoop([ch] { delete ch; });
+  }
+}
+
+FileConn::FileConn(EventLoop* loop,int fd)
+  : loop_(loop),fd_(fd),channel_(nullptr)
+{
+  channel_ = new Channel(loop_,fd_);
+  channel_->setReadBack([this] { handleRead(); });
+  channel_->setWriteBack([this] { handleWrite(); });
+  channel_->enableRead();
+}
+
+FileConn::~FileConn() {
+  handleClose();
+}
+
+bool FileConn::send(const std::string& data) {
+  if(closed_) return false;
+  if(send_queue_.empty()) {
+    ssize_t n = netNonBlocking::writeN(fd_,data.data(),data.size());
+    if(n == (ssize_t)data.size()) {
+      return true;
+    }
+    if(n > 0) {
+      send_queue_.push_back(data.substr(n));
+    } else {
+      if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+        send_queue_.push_back(data);
+      } else {
+        handleClose();
+        return false;
+      }
+    }
+  } else {
+    send_queue_.push_back(data);
+  }
+  if(!send_queue_.empty()) channel_->enableWrite();
+  return false;
+}
+
+void FileConn::setReadCallback(std::function<void(const char*,size_t)> cb) {
+  read_cb_ = std::move(cb);
+}
+
+void FileConn::setCloseCallback(std::function<void()> cb) {
+ close_cb_ = std::move(cb);
+}
+
+void FileConn::handleWrite() {
+  while(!send_queue_.empty()) {
+    auto& front = send_queue_.front();
+    ssize_t n = netNonBlocking::writeN(fd_,front.data(),front.size());
+    if(n > 0) {
+      front.erase(0,n);
+      if(front.empty()) send_queue_.pop_front();
+    } else {
+      if(errno == EAGAIN || errno == EWOULDBLOCK) break;
+      if(errno == EINTR) continue;
+      handleClose();
+      return;
+    }
+  }
+  if(send_queue_.empty()) {
+    channel_->disableWrite();
+    if(write_empty_cb_) write_empty_cb_();
+  }
+}
+
+void FileConn::handleRead() {
+  char buf[65536];
+  while(true) {
+    ssize_t n = netNonBlocking::readN(fd_,buf,sizeof(buf));
+    if(n > 0) {
+      if(read_cb_) read_cb_(buf,(size_t)n);
+    } else if(n == 0) {
+      handleClose();
+      return;
+    } else {
+      if(errno == EAGAIN || errno == EWOULDBLOCK) break;
+      if(errno == EINTR) continue;
+      handleClose();
+      return;
+    }
+  }
+}
+
+void FileConn::handleClose() {
+  if(closed_) return;
+  closed_ = true;
+  if(channel_) {
+    channel_->remove();
+    channel_->setReadBack(nullptr);
+    channel_->setWriteBack(nullptr);
+    channel_->setCloseBack(nullptr);
+  }
+  if(close_cb_) close_cb_();
+  close(fd_);
+  fd_ = -1;
+  if(channel_) {
+    Channel* ch = channel_;
+    channel_ = nullptr;
+    loop_->queueInLoop([ch] { delete ch; });
+  }
 }
