@@ -1,4 +1,6 @@
 #include "context.h"
+#include <filesystem>
+#include <cstdio>
 
 // 用户本人
 void ClientContext::setSelf(const User& user) {
@@ -49,7 +51,6 @@ std::vector<User> ClientContext::getFriendList() {
   std::lock_guard lock(mtx_);
   std::vector<User> res;
   for(auto &[id,u] : friends_) {
-    std::cout << u.username << std::endl;
     res.push_back(u);
   }
   return res;
@@ -142,6 +143,7 @@ void ClientContext::addMessage(const Message& msg) {
   } else if(msg.chat_type == "group") {
     msgs_[msg.target_id].push_back(msg);
   }
+  local_db_.save(msg);
 }
 
 std::vector<Message> ClientContext::getMessage(int id) {
@@ -346,4 +348,53 @@ void ClientContext::loadMessages(const std::unordered_map<int,std::vector<Messag
   }
 
   if (maxTime > last_sync_time_) last_sync_time_ = maxTime;
+}
+
+bool ClientContext::openLocalDb(const std::string& username,int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::error_code ec;
+  std::filesystem::create_directories("data",ec);
+  local_db_.close();
+  std::string path = "data/chatroom_" + username + "_" + std::to_string(uid) + ".db";
+  if(!local_db_.init(path)) return false;
+  auto all = local_db_.loadAll();
+  msgs_.clear();
+  known_msg_.clear();
+  last_sync_time_ = 0;
+  for(auto& msg : all) {
+    known_msg_.insert(msg.message_id);
+    if(msg.chat_type == "private") {
+      if(msg.from_uid == self_.uid) {
+        msgs_[msg.target_id].push_back(msg);
+      } else {
+        msgs_[msg.from_uid].push_back(msg);
+      }
+    } else if(msg.chat_type == "group") {
+      msgs_[msg.target_id].push_back(msg);
+    }
+    if(msg.time > last_sync_time_) last_sync_time_ = msg.time;
+  }
+  return true;
+}
+
+void ClientContext::removeLocalDb(const std::string& username,int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  local_db_.close();
+  std::string path = "data/chatroom_" + username + "_" + std::to_string(uid) + ".db";
+  std::remove(path.c_str());
+}
+
+void ClientContext::closeLocalDb() {
+  std::lock_guard<std::mutex> lock(mtx_);
+  local_db_.close();
+}
+
+void ClientContext::setLastLogoutTime(uint64_t t) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  last_logout_time_ = t;
+}
+
+uint64_t ClientContext::getLastLogoutTime() {
+  std::lock_guard<std::mutex> lock(mtx_);
+  return last_logout_time_;
 }

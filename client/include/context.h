@@ -1,6 +1,7 @@
 #pragma once
 #include "shared.h"
 #include "socket.h"
+#include "sqlite.h"
 #include <unordered_map>
 #include <vector>
 #include <mutex>
@@ -75,6 +76,11 @@ public:
   // 本地信息存储相关
   std::unordered_map<int,std::vector<Message>> getAllMessages() const;
   void loadMessages(const std::unordered_map<int,std::vector<Message>>& allMsgs);
+  bool openLocalDb(const std::string& username,int uid);
+  void closeLocalDb();
+  void removeLocalDb(const std::string& username,int uid);
+  void setLastLogoutTime(uint64_t t);
+  uint64_t getLastLogoutTime();
 
 private:
   // 用户本人
@@ -87,6 +93,8 @@ private:
   std::unordered_map<int,std::vector<Message>> msgs_;
   uint64_t last_sync_time_ = 0;
   std::unordered_set<std::string> known_msg_;
+  LocalDb local_db_;
+  uint64_t last_logout_time_ = 0;
   // 群组相关
   std::unordered_map<int,GroupInfo> groupMap_; // gid -> 信息
   std::vector<int> groupSort_; // gid排序

@@ -16,18 +16,6 @@
 #include <atomic>
 #include <ctime>
 
-
-
-class ChatStorage {
-public:
-  ChatStorage(const std::string& filepath);
-  bool save(const ClientContext& ctx);
-  bool load(ClientContext& ctx);
-
-private:
-  std::string filepath_;
-};
-
 class ClientNetwork {
 public:
   using json = nlohmann::json;
@@ -137,20 +125,18 @@ class FileService {
 public:
   using ProgressBack = std::function<void(uint64_t,uint64_t)>;
   FileService(ClientNetwork& network,ClientContext& ctx);
-  int uploadFile(const std::string& path,const std::string& chat_type,int target_id,const std::string& resume_file_id,ProgressBack progress,const std::string& file_name = "");
+  int uploadFile(const std::string& path,const std::string& chat_type,int target_id,ProgressBack progress,const std::string& file_name = "");
   int downloadFile(const std::string& file_id,const std::string& save_path,ProgressBack progress,uint64_t resume_offset = 0);
 
 private:
   struct DataLink {
     std::string ip;
     unsigned short port;
-    std::string token;
     std::string file_id;
     uint64_t offset;
     uint64_t file_size;
   };
   std::optional<DataLink> makeLink(const std::string& action,const nlohmann::json& data);
-  bool dataHandshake(const std::shared_ptr<TcpSocket>& sock,const std::string& token);
 private:
   ClientNetwork& network_;
   ClientContext& ctx_;

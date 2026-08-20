@@ -40,16 +40,36 @@ bool TcpClient::connectToHost(const char* ip,unsigned short port) {
   return true;
 }
 
-int start_client() {
+void dispatchPush(
+  const nlohmann::json& push,
+  FriendService& friendService,
+  ChatService& chatService,
+  GroupService& groupService
+) {
+  auto type = push.value("type","");
+  try {
+    if(type == "chat") {
+      chatService.handlePush(push);
+    } else if(type == "friend") {
+      friendService.handlePush(push);
+    } else if(type == "group") {
+      groupService.handlePush(push);
+    }
+  } catch(const std::exception& e) {
+    LOG(ERROR) << "推送处理异常: " << e.what();
+  }
+}
+
+int start_client(const std::string& ip,unsigned short port) {
   TcpClient client;
-  if(!client.connectToHost("127.0.0.1", 2100)) {
-    std::cerr << "[FAIL] connectToHost failed\n";
+  if(!client.connectToHost(ip.c_str(),port)) {
+    LOG(ERROR) << "connectToHost failed";
     return 1;
   }
-  std::cout << "[PASS] connected to server\n";
+  LOG(INFO) << "connected to server";
   auto sock = client.getSocket();
   if(!sock) {
-    std::cerr << "[FAIL] socket null\n";
+    LOG(ERROR) << "socket null";
     return 1;
   }
   std::string workpath=std::string(getenv("HOME")) + "/Download";
@@ -63,9 +83,24 @@ int start_client() {
   GroupService groupService(network,ctx);
   FileService fileService(network,ctx);
 
-  CliUI menu(authService,friendService,chatService,ctx);  
+  bool usecli = (getenv("CHAT_CLI") != nullptr);
   network.start();
 
-  menu.run();
+  if(usecli) {
+    CliUI cli(authService,friendService,chatService,groupService,fileService,ctx);
+    network.setPushHandler([&](const nlohmann::json& push) {
+      dispatchPush(push,friendService,chatService,groupService);
+      cli.notifyPush();
+    });
+    cli.run();
+    network.stop();
+  } else {
+    WebUI web(authService,friendService,chatService,groupService,fileService,ctx);
+    network.setPushHandler([&](const nlohmann::json& push) {
+      dispatchPush(push,friendService,chatService,groupService);
+      web.broadcast(push);
+    });
+    web.run("localhost");
+  }
   return 0;
 }

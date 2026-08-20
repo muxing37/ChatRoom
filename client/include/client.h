@@ -11,4 +11,4 @@
 #include <string>
 
 
-int start_client();
+int start_client(const std::string& ip,unsigned short port);

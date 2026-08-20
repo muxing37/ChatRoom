@@ -7,49 +7,6 @@
 
 namespace { constexpr size_t FILE_CHUNK = 1024 * 1024; }
 
-ChatStorage::ChatStorage(const std::string& filepath) : filepath_(filepath) {}
-
-bool ChatStorage::save(const ClientContext& ctx) {
-  auto allMsgs = ctx.getAllMessages();
-  nlohmann::json j;
-  nlohmann::json& messagesArray = j["messages"];
-  for(const auto& [peerId, msgs] : allMsgs) {
-    for(const auto& msg : msgs) {
-      nlohmann::json msgJson;
-      to_json(msgJson,msg);
-      messagesArray.push_back({
-        {"peer_id",peerId},
-        {"msg",msgJson}
-      });
-    }
-  }
-
-  std::ofstream ofs(filepath_);
-  if(!ofs.is_open()) return false;
-  ofs << j.dump(4);
-  return true;
-}
-
-bool ChatStorage::load(ClientContext& ctx) {
-  std::ifstream ifs(filepath_);
-  if(!ifs.is_open()) return false;
-  nlohmann::json j;
-  try {
-    ifs >> j;
-  } catch(...) {
-    return false;
-  }
-  std::unordered_map<int, std::vector<Message>> allMsgs;
-  for(const auto& item : j.at("messages")) {
-    int peerId = item.at("peer_id");
-    Message msg;
-    from_json(item.at("msg"), msg);
-    allMsgs[peerId].push_back(msg);
-  }
-  ctx.loadMessages(allMsgs);
-  return true;
-}
-
 ClientNetwork::ClientNetwork(std::shared_ptr<TcpSocket>& sock) : sock_(std::move(sock)) {}
 
 ClientNetwork::~ClientNetwork() {
@@ -131,7 +88,7 @@ void ClientNetwork::dispatch(const json& j) {
       nlohmann::json pong;
       pong["type"] = "heartbeat";
       pong["action"] = "pong";
-      send(pong.dump());
+      send(pong);
       return;
     }
     if(pushHandler_) pushHandler_(j);
@@ -169,10 +126,12 @@ bool AuthService::login(const std::string& username,const std::string& password)
     return false;
   }
   ctx_.reset(); // 清空上个会话的本地状态
+  ctx_.setLastLogoutTime(reply["data"].value("last_logout_time",0ULL));
   User user;
   user.uid = reply["data"]["uid"];
   user.username=username;
   ctx_.setSelf(user);
+  ctx_.openLocalDb(username,user.uid);
   return true;
 }
 
@@ -195,6 +154,7 @@ bool AuthService::regis(const std::string& username,const std::string& password)
   user.uid = reply["data"]["uid"];
   user.username = username;
   ctx_.setSelf(user);
+  ctx_.openLocalDb(username,user.uid);
   return true;
 }
 
@@ -215,7 +175,9 @@ bool AuthService::delauth(const std::string& password) {
     {"uid",ctx_.getSelf().uid}
   };
   auto reply = network_.request(j);
-  return reply["status"] == 0;
+  if(reply["status"] != 0) return false;
+  ctx_.removeLocalDb(ctx_.getSelf().username,ctx_.getSelf().uid);
+  return true;
 }
 
 FriendService::FriendService(ClientNetwork& network,ClientContext& context) : network_(network),ctx_(context) {}
@@ -394,6 +356,7 @@ int ChatService::sendPrivateMessage(int to_uid,const std::string& text) {
   msg.content = text;
   msg.time = data["time"];
   ctx_.addMessage(msg);
+  ctx_.markMessageReceived(msg.message_id);
   return 0;
 }
 
@@ -415,6 +378,7 @@ int ChatService::sendGroupMessage(int gid,const std::string& text) {
   if(reply["status"] != 0) return reply["status"];
   Message msg = reply["data"].get<Message>();
   ctx_.addMessage(msg);
+  ctx_.markMessageReceived(msg.message_id);
   return 0;
 }
 
@@ -755,35 +719,17 @@ std::optional<FileService::DataLink> FileService::makeLink(const std::string& ac
   DataLink dl;
   dl.ip = reply["data"].value("ip",std::string());
   dl.port = (unsigned short)reply["data"].value("port",0);
-  dl.token = reply["data"].value("token",std::string());
   dl.file_id = reply["data"].value("file_id",std::string());
   dl.offset = reply["data"].value("offset",(uint64_t)0);
   dl.file_size = reply["data"].value("file_size",(uint64_t)0);
-  if(dl.ip.empty() || dl.port == 0 || dl.token.empty()) return std::nullopt;
+  if(dl.ip.empty() || dl.port == 0) return std::nullopt;
   return dl;
-}
-
-bool FileService::dataHandshake(const std::shared_ptr<TcpSocket>& sock,const std::string& token) {
-  nlohmann::json j = {
-    {"token",token},
-    {"uid",ctx_.getSelf().uid}
-  };
-  if(sock->sendMsg(j.dump()) != NetResult::OK) return false;
-  std::string ack;
-  if(sock->recvMsg(ack) != NetResult::OK) return false;
-  try {
-    auto r = nlohmann::json::parse(ack);
-    return r.value("status",-1) == 0;
-  } catch(...) {
-    return false;
-  } 
 }
 
 int FileService::uploadFile(
   const std::string& path,
   const std::string& chat_type,
   int target_id,
-  const std::string& resume_file_id,
   ProgressBack progress,
   const std::string& f_name
 ) {
@@ -817,7 +763,7 @@ int FileService::uploadFile(
   }
   std::string file_hash = sha256File(full_path);
 
-  std::string file_id = resume_file_id;
+  std::string file_id = "";
   for(int i = 0;i < 3;i++) {
     nlohmann::json data = {
       {"chat_type",chat_type},
@@ -834,8 +780,8 @@ int FileService::uploadFile(
     }
     file_id = dl->file_id;
     auto sock = TcpSocket::connect(dl->ip, dl->port);
-    if(!sock || !dataHandshake(sock, dl->token)) {
-      std::cerr << "[FileService] 上传失败: 数据连接/握手失败 " << dl->ip << ":" << dl->port << std::endl;
+    if(!sock) {
+      std::cerr << "[FileService] 上传失败: 连接失败 " << dl->ip << ":" << dl->port << std::endl;
       return -5;
     }
 
@@ -884,7 +830,7 @@ int FileService::downloadFile(const std::string& file_id,const std::string& save
     fid = dl->file_id;
 
     auto sock = TcpSocket::connect(dl->ip,dl->port);
-    if(!sock || !dataHandshake(sock,dl->token)) return -1;
+    if(!sock) return -1;
 
     int wfd = open(save_path.c_str(), O_WRONLY | O_CREAT, 0644);
     if(wfd < 0) return -1;
