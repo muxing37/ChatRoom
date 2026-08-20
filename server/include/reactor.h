@@ -1,4 +1,5 @@
 #pragma once
+#include <glog/logging.h>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -181,4 +182,31 @@ private:
   std::deque<std::string> send_queue_;
   std::function<void()> close_cb_;
   std::function<void(const std::string&)> message_cb_;
+};
+
+class FileConn {
+public:
+  FileConn(EventLoop* loop,int fd);
+  ~FileConn();
+
+  bool send(const std::string& data);
+  void setReadCallback(std::function<void(const char*,size_t)> cb);
+  void setCloseCallback(std::function<void()> cb);
+  void handleClose();
+  void setWriteEmptyCallback(std::function<void()> cb) { write_empty_cb_ = std::move(cb); }
+  int fd() { return fd_; };
+
+private:
+  void handleWrite();
+  void handleRead();
+
+private:
+  int fd_;
+  EventLoop* loop_;
+  Channel* channel_;
+  bool closed_ = false;
+  std::deque<std::string> send_queue_;
+  std::function<void()> close_cb_;
+  std::function<void()> write_empty_cb_;
+  std::function<void(const char*,size_t)> read_cb_;
 };
