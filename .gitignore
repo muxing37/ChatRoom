@@ -6,3 +6,5 @@ reruirements.txt
 client/web/
 client/include/webui.h
 client/src/webui.cpp
+server/config/db.config
+stress/

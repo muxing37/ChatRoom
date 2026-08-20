@@ -1,5 +1,6 @@
 #pragma once
 #include <iostream>
+#include <glog/logging.h>
 #include <string>
 #include <cstdint>
 #include <nlohmann/json.hpp>
@@ -16,6 +17,7 @@ struct Account {
     std::string username;
     std::string password_hash;
     std::string salt;
+    uint64_t last_logout_time;
 };
 
 struct GroupInfo {
