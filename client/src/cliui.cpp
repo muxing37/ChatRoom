@@ -51,8 +51,15 @@ bool CliUI::loginMenu() {
       return false;
     }
     std::string username = inputString("用户名:");
+    if(username.size() == 0) {
+      std::cout << "用户名不能为空" << std::endl;
+      continue;
+    }
     std::string password = inputString("密码:");
-
+    if(password.size() == 0) {
+      std::cout << "密码不能为空" << std::endl;
+      continue;
+    }
     bool ok = false;
     if(choice == 1) {
       ok = authService_.login(username,password);
@@ -236,14 +243,20 @@ void CliUI::chatLoop(int peerId,bool isGroup) {
   }
   chatPrinted_ = hist.size();
   shownSeq_ = pushSeq_.load();
-  std::cout << "进入" << title << "，输入 /exit 退出，/file 发送文件\n";
+  std::cout << "进入" << title << "，输入 /exit 退出，/upload 发送文件，/download 发送文件\n";
 
   std::string line;
   while(running_) {
     if(!std::getline(std::cin,line)) break;
     if(line == "/exit") break;
-    if(line == "/file") {
+    if(line == "/upload") {
       uploadFileToChat(peerId,isGroup);
+      printNewMessages(peerId);
+      shownSeq_ = pushSeq_.load();
+      continue;
+    }
+    if(line == "/download") {
+      downloadFile();
       printNewMessages(peerId);
       shownSeq_ = pushSeq_.load();
       continue;
@@ -553,17 +566,23 @@ void CliUI::uploadFile() {
 
 void CliUI::downloadFile() {
   std::string file_id = inputString("请输入file_id:");
+  std::string file_name = inputString("请输入file_name:");
   if(file_id.empty()) return;
   std::string dir = std::string(getenv("HOME")) + "/Download";
   mkdir(dir.c_str(),0755);
-  std::string save_path = dir + "/" + file_id;
+  std::string save_path = dir + "/" + file_id + ".downloading";
+  std::string final_path = dir + "/" + file_name;
+  uint64_t resume = 0;
+  struct stat st;
+  if(stat(save_path.c_str(),&st) == 0 && S_ISREG(st.st_mode)) resume = (uint64_t)st.st_size;
   int rc = fileService_.downloadFile(file_id,save_path,
     [](uint64_t done,uint64_t total){
       int pct = (int)(done*100/total);
       std::cout << "\r下载中: " << pct << "% (" << done << "/" << total << ")  ";
       std::cout.flush();
-    });
-  if(rc == 0) std::cout << "\n下载完成: " << save_path << "\n";
+    },resume);
+  std::rename(save_path.c_str(),final_path.c_str());
+  if(rc == 0) std::cout << "\n下载完成: " << final_path << "\n";
   else std::cout << "\n下载失败(code=" << rc << ")\n";
 }
 

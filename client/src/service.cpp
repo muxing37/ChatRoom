@@ -831,15 +831,16 @@ int FileService::downloadFile(const std::string& file_id,const std::string& save
     fid = dl->file_id;
 
     auto sock = TcpSocket::connect(dl->ip,dl->port);
-    if(!sock) return -1;
+    std::cout << dl->ip << ":" << dl->port;
+    if(!sock) return -2;
 
     int wfd = open(save_path.c_str(), O_WRONLY | O_CREAT, 0644);
-    if(wfd < 0) return -1;
+    if(wfd < 0) return -3;
     uint64_t offset = dl->offset;
     uint64_t total = dl->file_size;
     if(lseek(wfd,(off_t)offset,SEEK_SET) == (off_t)-1) {
       close(wfd);
-      return -1;
+      return -4;
     }
     char buf[FILE_CHUNK];
     bool ok = true;
@@ -860,6 +861,6 @@ int FileService::downloadFile(const std::string& file_id,const std::string& save
     if(ok && offset == total) return 0;
     resume_offset = offset;
   }
-  return -1;
+  return -5;
 }
 

@@ -1,7 +1,5 @@
 test/
 build/
-src/test.cpp
-src/test
 reruirements.txt
 server/config/db.config
 stress/
