@@ -1,0 +1,2207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChatRoom</title>
+<style>
+/* ===== 主题变量 ===== */
+:root{
+  --text:#eaf1fa; --text-dim:#8ea3ba; --text-faint:#5f7690;
+  --accent:#4c8bf5; --accent2:#6a5cf5; --accent3:#22d3ee;
+  --glass:rgba(16,26,43,.55); --glass-strong:rgba(20,31,50,.82);
+  --glass-border:rgba(255,255,255,.10);
+  --hover:rgba(255,255,255,.07);
+  --danger:#ff5c7a; --ok:#34d399; --warn:#fbbf24;
+  --msg-other:rgba(255,255,255,.07);
+  --input-bg:rgba(255,255,255,.06);
+  --scroll-thumb:rgba(255,255,255,.18);
+}
+body[data-theme="light"]{
+  --text:#22314a; --text-dim:#6b7f96; --text-faint:#9aaec4;
+  --glass:rgba(255,255,255,.72); --glass-strong:rgba(255,255,255,.88);
+  --glass-border:rgba(20,40,80,.10);
+  --hover:rgba(30,60,120,.06);
+  --msg-other:#ffffff;
+  --input-bg:rgba(30,60,120,.05);
+  --scroll-thumb:rgba(30,60,120,.25);
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif;
+  color:var(--text); background:#0c1422; min-height:100vh; overflow:hidden;
+}
+body {
+  background:
+    radial-gradient(1100px 700px at 85% -10%, rgba(106,92,245,.32), transparent 60%),
+    radial-gradient(900px 650px at -10% 105%, rgba(34,211,238,.22), transparent 55%),
+    linear-gradient(135deg,#0c1422,#17263f 50%,#0c1422);
+  background-attachment:fixed;
+}
+body[data-theme="light"] {
+  background:
+    radial-gradient(1100px 700px at 85% -10%, rgba(106,92,245,.16), transparent 60%),
+    radial-gradient(900px 650px at -10% 105%, rgba(34,211,238,.14), transparent 55%),
+    linear-gradient(135deg,#eef2f8,#e7ecf6 50%,#eef2f8);
+}
+button { cursor:pointer; border:none; border-radius:8px; font-family:inherit; }
+input { outline:none; font-family:inherit; }
+a { color:var(--accent3); text-decoration:none; }
+a:hover { text-decoration:underline; }
+
+/* ===== 粒子背景 ===== */
+#particles { position:fixed; inset:0; z-index:0; pointer-events:none; }
+#loginPage, #mainPage { position:relative; z-index:1; }
+
+/* ===== 加载遮罩 ===== */
+#loading{ display:none; position:fixed; inset:0; z-index:400; background:rgba(8,14,26,.7);
+  backdrop-filter:blur(8px); align-items:center; justify-content:center; flex-direction:column; gap:16px; }
+#loading.show{ display:flex; }
+.spinner{ width:46px; height:46px; border-radius:50%; border:3px solid rgba(255,255,255,.15);
+  border-top-color:var(--accent3); animation:spin .8s linear infinite; }
+#loading p{ color:var(--text-dim); font-size:14px; letter-spacing:2px; }
+@keyframes spin { to{ transform:rotate(360deg); } }
+
+/* ===== 客户端离线遮罩（心跳检测到客户端进程停止） ===== */
+#clientDown{ display:none; position:fixed; inset:0; z-index:500; background:rgba(8,14,26,.82);
+  backdrop-filter:blur(10px); align-items:center; justify-content:center; flex-direction:column; gap:16px; }
+#clientDown.show{ display:flex; }
+#clientDown .cd-icon{ font-size:52px; }
+#clientDown p{ color:var(--text); font-size:16px; letter-spacing:1px; }
+#clientDown .cd-sub{ color:var(--text-dim); font-size:13px; }
+
+/* ===== 登录页 ===== */
+#loginPage {
+  height:100vh; display:flex; align-items:center; justify-content:center;
+}
+.login-card {
+  width:380px; border-radius:20px; padding:40px 36px;
+  background:var(--glass-strong); border:1px solid var(--glass-border);
+  backdrop-filter:blur(20px);
+  box-shadow:0 24px 70px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.08);
+  animation:cardIn .6s cubic-bezier(.16,1,.3,1);
+}
+@keyframes cardIn { from{opacity:0; transform:translateY(26px) scale(.96);} to{opacity:1; transform:none;} }
+.login-card .logo {
+  width:60px; height:60px; margin:0 auto 14px; border-radius:18px; font-size:28px;
+  display:flex; align-items:center; justify-content:center; color:#fff;
+  background:linear-gradient(135deg,#4c8bf5,#6a5cf5,#22d3ee);
+  box-shadow:0 10px 26px rgba(106,92,245,.45); animation:logoFloat 3s ease-in-out infinite;
+}
+@keyframes logoFloat { 0%,100%{ transform:translateY(0);} 50%{ transform:translateY(-6px);} }
+.login-card h1 {
+  text-align:center; font-size:30px; letter-spacing:2px;
+  background:linear-gradient(90deg,#4c8bf5,#6a5cf5,#22d3ee);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+  filter:drop-shadow(0 2px 12px rgba(106,92,245,.35));
+}
+.login-card .sub { text-align:center; color:var(--text-dim); font-size:13px; margin-bottom:26px; }
+.login-card input {
+  width:100%; padding:13px 15px; margin-bottom:14px; border-radius:10px;
+  border:1px solid var(--glass-border); background:var(--input-bg); color:var(--text);
+  font-size:14px; transition:border .25s, box-shadow .25s;
+}
+.login-card input::placeholder { color:var(--text-faint); }
+.login-card input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,139,245,.25); }
+.login-card .btn-row { display:flex; gap:12px; }
+.login-card button {
+  flex:1; padding:12px; font-size:15px; font-weight:600; color:#fff;
+  background:linear-gradient(135deg,#4c8bf5,#6a5cf5); border-radius:10px;
+  box-shadow:0 8px 22px rgba(76,139,245,.35);
+  transition:transform .15s, box-shadow .2s;
+}
+.login-card button:hover { transform:translateY(-1px); box-shadow:0 12px 28px rgba(76,139,245,.5); }
+.login-card button:active { transform:translateY(0) scale(.98); }
+.login-card button.reg { background:var(--hover); color:var(--text); box-shadow:none; }
+.login-card button.loading { opacity:.75; pointer-events:none; }
+.login-card button.loading::after {
+  content:''; display:inline-block; width:12px; height:12px; margin-left:8px; vertical-align:-2px;
+  border:2px solid rgba(255,255,255,.35); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite;
+}
+.login-card .err { color:var(--danger); font-size:13px; margin-top:12px; min-height:18px; text-align:center; }
+
+/* ===== 主界面 ===== */
+#mainPage { display:none; height:100vh; }
+#sidebar {
+  width:286px; display:flex; flex-direction:column; flex-shrink:0;
+  background:var(--glass); backdrop-filter:blur(18px);
+  border-right:1px solid var(--glass-border);
+}
+#selfInfo { padding:16px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; }
+#selfInfo .my-avatar {
+  width:44px; height:44px; border-radius:50%; flex-shrink:0; color:#fff; font-size:18px; font-weight:700;
+  display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,#4c8bf5,#6a5cf5);
+  box-shadow:0 4px 14px rgba(76,139,245,.4);
+}
+#selfInfo .name { font-size:16px; font-weight:700; }
+#selfInfo .uid { font-size:12px; color:var(--text-dim); margin-top:2px; }
+#tabs { display:flex; padding:10px 10px 0; gap:6px; }
+.tab {
+  flex:1; padding:9px 0; text-align:center; font-size:14px; color:var(--text-dim);
+  cursor:pointer; border-radius:8px; position:relative; transition:color .2s, background .2s;
+}
+.tab:hover { color:var(--text); background:var(--hover); }
+.tab.active { color:var(--text); background:rgba(76,139,245,.18); }
+.tab.active::after {
+  content:''; position:absolute; left:50%; bottom:-2px; width:18px; height:3px; border-radius:2px;
+  background:linear-gradient(90deg,#4c8bf5,#22d3ee); transform:translateX(-50%);
+}
+/* ===== tab 未读角标 + 搜索框 ===== */
+.tab-badge { position:absolute; top:3px; right:calc(50% - 24px); min-width:15px; height:15px; padding:0 4px;
+  background:var(--danger); color:#fff; font-size:10px; line-height:15px; text-align:center; border-radius:8px; display:none; }
+.tab-badge.show { display:inline-block; }
+#searchBox { margin:8px 12px 0; padding:8px 12px; border:1px solid var(--glass-border); border-radius:10px;
+  background:var(--input-bg); color:var(--text); font-size:13px; width:calc(100% - 24px); box-sizing:border-box; }
+#searchBox::placeholder { color:var(--text-faint); }
+#searchBox:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,139,245,.2); }
+#list { flex:1; overflow-y:auto; padding:10px; }
+#list::-webkit-scrollbar { width:6px; }
+#list::-webkit-scrollbar-thumb { background:var(--scroll-thumb); border-radius:3px; }
+
+.list-head { display:flex; gap:8px; padding:2px 2px 10px; }
+.list-title { color:var(--text-dim); font-size:12px; padding:8px 4px; }
+
+.item {
+  display:flex; align-items:center; gap:10px; padding:10px; border-radius:10px; cursor:pointer;
+  transition:background .15s; position:relative;
+}
+.item:hover { background:var(--hover); }
+.avatar {
+  width:40px; height:40px; border-radius:50%; color:#fff; position:relative;
+  display:flex; align-items:center; justify-content:center; font-weight:700; flex-shrink:0;
+  background:linear-gradient(135deg,#4c8bf5,#6a5cf5);
+  box-shadow:0 3px 10px rgba(0,0,0,.25);
+}
+.avatar .dot {
+  position:absolute; right:-1px; bottom:-1px; width:11px; height:11px; border-radius:50%;
+  background:var(--ok); border:2px solid var(--glass-strong); animation:pulse 2s infinite;
+}
+.avatar .dot.off { background:#7f8c9b; animation:none; }
+@keyframes pulse {
+  0%,100%{ box-shadow:0 0 0 0 rgba(52,211,153,.5);}
+  50%{ box-shadow:0 0 0 5px rgba(52,211,153,0);}
+}
+.item-main { flex:1; min-width:0; }
+.item-name { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:6px; }
+.item-name .uname { overflow:hidden; text-overflow:ellipsis; }
+.item-name .uid { color:var(--text-dim); font-size:11px; flex-shrink:0; }
+/* 在线/离线：右上角（行末） */
+.item-name .st { margin-left:auto; flex-shrink:0; font-size:11px; transition:color .15s; }
+.item-name .st.on { color:var(--ok); }
+.item-name .st.off { color:var(--text-faint); }
+/* 群信息（群号/人数/角色）：右上角右对齐 */
+.item-name .gmeta { margin-left:auto; flex-shrink:0; font-size:11px; color:var(--text-faint); display:flex; align-items:center; gap:2px; }
+.item-sub { font-size:12px; margin-top:2px; color:var(--text-dim); display:flex; align-items:center; gap:10px; }
+.item-sub .msg { flex:1; min-width:0; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }  /* 消息固定灰色，对齐用户名 */
+.item-sub .msg-time { flex-shrink:0; color:var(--text-faint); font-size:11px; margin-left:auto; }
+.item-actions { display:flex; gap:4px; flex-shrink:0; }
+.badge {
+  background:linear-gradient(135deg,#ff5c7a,#f43f5e); color:#fff; border-radius:12px; font-size:11px;
+  padding:1px 7px; margin-left:4px; box-shadow:0 2px 8px rgba(255,92,122,.4);
+  animation:pop .3s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes pop { from{ transform:scale(.4);} to{ transform:scale(1);} }
+.empty { color:var(--text-dim); text-align:center; padding:24px 0; font-size:13px; }
+.tag { font-size:11px; padding:1px 7px; border-radius:5px; }
+.tag.owner, .tag.p0 { background:linear-gradient(135deg,#fbbf24,#f59e0b); color:#1c1400; }
+.tag.p1 { background:rgba(76,139,245,.2); color:var(--accent); }
+.tag.p2 { background:var(--hover); color:var(--text-dim); }
+.tag.cnt { background:rgba(34,211,238,.18); color:var(--accent3); }
+
+#sidebar .side-foot { padding:12px; border-top:1px solid var(--glass-border); display:flex; flex-direction:column; gap:8px; }
+#statBar { display:flex; gap:8px; }
+.stat-chip { flex:1; text-align:center; font-size:11px; color:var(--text-dim); background:var(--hover); padding:5px 0; border-radius:8px; }
+.stat-chip b { color:var(--accent3); font-size:13px; }
+.side-btns { display:flex; gap:8px; }
+#themeBtn { padding:9px 10px; background:var(--hover); color:var(--text-dim); border-radius:8px; font-size:12px; transition:color .15s; }
+#themeBtn:hover { color:var(--text); }
+#settingsBtn { padding:9px 10px; background:var(--hover); color:var(--text-dim); border-radius:8px; font-size:12px; transition:color .15s; }
+#settingsBtn:hover { color:var(--text); }
+
+/* ===== 通用按钮 ===== */
+.btn { padding:6px 12px; font-size:13px; background:var(--hover); color:var(--text); border-radius:8px; transition:background .15s, transform .1s; }
+.btn:hover { background:rgba(255,255,255,.16); }
+.btn:active { transform:scale(.96); }
+.btn.small { padding:5px 10px; font-size:12px; }
+.btn.tiny { padding:3px 8px; font-size:11px; background:rgba(255,255,255,.12); color:var(--text); }
+.btn.tiny.ok { background:rgba(52,211,153,.18); color:var(--ok); }
+.btn.tiny.warn { background:rgba(255,92,122,.18); color:var(--danger); }
+.primary {
+  color:#fff; background:linear-gradient(135deg,#4c8bf5,#6a5cf5);
+  box-shadow:0 6px 16px rgba(76,139,245,.3); transition:transform .15s, box-shadow .2s;
+}
+.primary:hover { transform:translateY(-1px); box-shadow:0 10px 22px rgba(76,139,245,.45); }
+
+/* ===== 聊天面板 ===== */
+#mainPanel { flex:1; display:flex; flex-direction:column; min-width:0; background:var(--glass); backdrop-filter:blur(18px); position:relative; }
+/* 拖拽上传遮罩 */
+#dropMask{
+  display:none; position:absolute; inset:0; z-index:60; flex-direction:column;
+  align-items:center; justify-content:center; gap:10px; pointer-events:none;
+  background:rgba(76,139,245,.12); backdrop-filter:blur(3px);
+  border:2px dashed var(--accent); border-radius:12px;
+}
+#dropMask.show{ display:flex; }
+#dropMask .drop-title{ font-size:16px; color:var(--accent3); font-weight:600; }
+#dropMask .drop-name{ font-size:13px; color:var(--text); max-width:70%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#chatHeader {
+  height:58px; border-bottom:1px solid var(--glass-border); display:flex;
+  align-items:center; padding:0 20px;
+}
+#chatTitle { flex:1; font-size:16px; font-weight:700; }
+#chatHeader .btn { background:var(--hover); color:var(--text); }
+
+#messages { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:10px; }
+#messages::-webkit-scrollbar { width:6px; }
+#messages::-webkit-scrollbar-thumb { background:var(--scroll-thumb); border-radius:3px; }
+.row {
+  max-width:72%; min-width:0; display:flex; flex-direction:column; gap:4px;
+  position:relative; animation:msgIn .3s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes msgIn { from{ opacity:0; transform:translateY(12px) scale(.97);} to{ opacity:1; transform:none;} }
+/* 带头像的消息行：横向布局（头像列 + 内容列） */
+.row.has-av { flex-direction:row; align-items:flex-start; gap:8px; }
+.row.has-av .av-col { display:flex; flex-direction:column; align-items:center; gap:2px; flex-shrink:0; }
+.row.has-av .content-col { display:flex; flex-direction:column; gap:4px; min-width:0; }
+/* 自己的消息：头像在右侧（翻转），头像顶部与气泡顶部持平 */
+.row.mine.has-av { flex-direction:row-reverse; align-items:flex-start; }
+.row.other { align-self:flex-start; align-items:flex-start; }
+.row.mine { align-self:flex-end; align-items:flex-end; }
+/* 消息发送者头像（右侧聊天区） */
+.msg-av {
+  width:34px; height:34px; border-radius:50%; color:#fff; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700;
+  box-shadow:0 2px 8px rgba(0,0,0,.2);
+}
+.msg-name { font-size:11px; color:var(--text-faint); max-width:60px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 群聊头像可点击（查看成员信息） */
+.msg-av.clickable { cursor:pointer; transition:transform .15s, box-shadow .15s; }
+.msg-av.clickable:hover { transform:scale(1.12); box-shadow:0 4px 14px rgba(0,0,0,.35); }
+/* 群成员信息弹窗内容 */
+.mi-head { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+.mi-av { width:48px; height:48px; border-radius:50%; color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:700; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+.mi-title { font-size:15px; font-weight:700; }
+.mi-me { font-size:11px; color:var(--text-dim); margin-left:6px; font-weight:400; }
+.mi-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-top:1px solid var(--glass-border); font-size:13px; }
+.mi-row span { color:var(--text-dim); }
+.mi-row b { font-weight:600; }
+.mi-acts { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:14px; padding-top:12px; border-top:1px solid var(--glass-border); }
+.row .bubble {
+  padding:10px 14px; border-radius:14px; font-size:14px; line-height:1.55;
+  min-width:0; max-width:100%;
+  overflow-wrap:break-word; word-break:break-word;
+}
+.row.other .bubble { background:var(--msg-other); border:1px solid var(--glass-border); border-bottom-left-radius:4px; }
+.row.mine .bubble {
+  color:#fff; background:linear-gradient(135deg,#4c8bf5,#6a5cf5);
+  border-bottom-right-radius:4px; box-shadow:0 6px 18px rgba(76,139,245,.3);
+}
+.row.mine .bubble a { color:#fff; }
+.row .time { font-size:11px; opacity:.6; padding:0 4px; }
+/* 新消息分隔线 */
+.new-msg-sep { align-self:center; display:flex; align-items:center; gap:10px; width:80%; margin:8px 0; color:var(--text-dim); font-size:11px; }
+.new-msg-sep::before,.new-msg-sep::after { content:''; flex:1; height:1px; background:var(--text-faint); opacity:.5; }
+.date-sep { align-self:center; font-size:11px; color:var(--text-dim); background:var(--hover); padding:3px 12px; border-radius:12px; margin:6px 0; }
+/* ===== 文件卡片（非图片文件消息） ===== */
+.file-card {
+  display:flex; align-items:center; gap:10px; min-width:220px; max-width:320px;
+  padding:8px 10px; border-radius:10px; cursor:pointer;
+  background:rgba(0,0,0,.06); transition:background .15s, transform .15s;
+}
+.file-card:hover { background:rgba(0,0,0,.12); transform:translateY(-1px); }
+.file-icon {
+  width:42px; height:42px; border-radius:9px; color:#fff; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:800; letter-spacing:.5px;
+  box-shadow:0 3px 10px rgba(0,0,0,.18);
+}
+.file-icon.pdf   { background:linear-gradient(135deg,#f87171,#ef4444); }
+.file-icon.zip   { background:linear-gradient(135deg,#fbbf24,#f59e0b); }
+.file-icon.doc   { background:linear-gradient(135deg,#60a5fa,#3b82f6); }
+.file-icon.xls   { background:linear-gradient(135deg,#34d399,#10b981); }
+.file-icon.ppt   { background:linear-gradient(135deg,#fb923c,#f97316); }
+.file-icon.txt   { background:linear-gradient(135deg,#94a3b8,#64748b); }
+.file-icon.audio { background:linear-gradient(135deg,#c084fc,#a855f7); }
+.file-icon.video { background:linear-gradient(135deg,#818cf8,#6366f1); }
+.file-icon.other { background:linear-gradient(135deg,#a78bfa,#8b5cf6); }
+.file-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.file-card .file-name { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.file-meta { font-size:11px; opacity:.65; }
+.file-dl {
+  flex-shrink:0; padding:4px 10px; border-radius:7px; font-size:12px; cursor:pointer; border:none;
+  background:rgba(76,139,245,.18); color:var(--accent); transition:background .15s;
+}
+.file-dl:hover { background:rgba(76,139,245,.3); }
+/* 自己消息（蓝色气泡）：卡片/文字用白色系 */
+.row.mine .file-card { background:rgba(255,255,255,.14); }
+.row.mine .file-card:hover { background:rgba(255,255,255,.22); }
+.row.mine .file-name { color:#fff; }
+.row.mine .file-meta { color:#fff; opacity:.75; }
+.row.mine .file-dl { background:rgba(255,255,255,.22); color:#fff; }
+.row.mine .file-dl:hover { background:rgba(255,255,255,.34); }
+/* 浅色模式：己方文件卡片用蓝色渐变底（避免白字与浅色背景融为一体） */
+body[data-theme="light"] .row.mine .file-card { background:linear-gradient(135deg,#4c8bf5,#6a5cf5); }
+body[data-theme="light"] .row.mine .file-card:hover { background:linear-gradient(135deg,#4c8bf5,#6a5cf5); filter:brightness(1.06); }
+/* 文件气泡内下载进度条 */
+.file-dl-bar { display:flex; align-items:center; gap:6px; margin-top:2px; }
+.file-dl-track { flex:1; height:4px; border-radius:3px; background:rgba(127,140,155,.3); overflow:hidden; }
+.file-dl-fill { height:100%; width:0%; border-radius:3px; background:linear-gradient(90deg,#4c8bf5,#22d3ee); transition:width .2s; }
+.file-dl-pct { font-size:10px; color:var(--text-dim); min-width:32px; text-align:right; }
+.row.mine .file-dl-pct { color:rgba(255,255,255,.8); }
+.row.mine .file-dl-track { background:rgba(255,255,255,.25); }
+/* 文件消息独立行（不套普通气泡） */
+.row.file-msg .content-col { align-items:flex-start; }
+.row.file-msg.mine .content-col { align-items:flex-end; }
+/* 消息时间统一：对方左下、己方右下（文本/图片/文件全覆盖） */
+.row.other .content-col { align-items:flex-start; }
+.row.mine .content-col { align-items:flex-end; }
+/* ===== 图片消息（独立大图，类似 QQ/微信，不套气泡） ===== */
+/* 时间角标统一在右侧（与文本消息一致）：mine 靠右，other 靠左，但 time 都在内容右侧 */
+.row.img { display:flex; align-items:flex-start; gap:6px; }
+.row.other.img { align-self:flex-start; }
+.row.mine.img { align-self:flex-end; }
+/* 图片消息时间：对方左下角、己方右下角 */
+.row.other.img .content-col { align-items:flex-start; }
+.row.mine.img .content-col { align-items:flex-end; }
+/* 图片消息：头像与图片顶部齐平（防止 .row.img 的 flex-end 把头像拉到底部） */
+.row.img.has-av { align-items:flex-start; }
+.img-msg {
+  max-width:280px; max-height:320px;
+  width:auto; height:auto; object-fit:contain;
+  border-radius:12px; cursor:pointer; display:block;
+  box-shadow:0 4px 18px rgba(0,0,0,.3); transition:transform .2s;
+  background:var(--hover);
+}
+.img-msg:hover { transform:scale(1.02); }
+/* 图片占位：加载前按真实比例撑起容器，避免加载时布局跳动 */
+.img-msg.ph { object-fit:cover; background:var(--hover); }
+/* 图片悬停角标：保存按钮（右上角浮现） */
+.img-wrap { position:relative; display:inline-block; }
+.img-save {
+  position:absolute; top:6px; right:6px; display:none;
+  padding:4px 10px; font-size:12px; border-radius:8px; cursor:pointer;
+  background:rgba(10,16,28,.72); color:#fff; border:1px solid rgba(255,255,255,.18);
+  backdrop-filter:blur(6px);
+}
+.img-wrap:hover .img-save { display:inline-block; }
+#lightboxImg { max-width:90vw; max-height:90vh; border-radius:10px; box-shadow:0 8px 60px rgba(0,0,0,.6); animation:zoomIn .25s cubic-bezier(.16,1,.3,1); }
+@keyframes zoomIn { from{ opacity:0; transform:scale(.85);} to{ opacity:1; transform:scale(1);} }
+/* 灯箱控件：左右箭头 + 悬停显示操作栏 */
+.lb-btn { position:absolute; z-index:3; border:none; cursor:pointer; color:#fff;
+  background:rgba(15,22,38,.6); border-radius:50%; width:40px; height:40px; font-size:22px;
+  display:flex; align-items:center; justify-content:center; transition:background .15s; }
+.lb-btn:hover { background:rgba(15,22,38,.9); }
+.lb-prev { left:18px; top:50%; transform:translateY(-50%); }
+.lb-next { right:18px; top:50%; transform:translateY(-50%); }
+.lb-ctrl { position:absolute; right:14px; top:14px; display:flex; gap:8px; opacity:0; transition:opacity .25s; }
+/* 灯箱悬停显示/静止淡出：由 JS 控制（移入显示，静止2s后淡出） */
+.lb-ctrl.show { opacity:1; }
+.lb-btn.ctrl { position:static; width:auto; height:auto; border-radius:8px; font-size:13px; padding:7px 12px; }
+.row.mine .bubble .btn { background:rgba(255,255,255,.2); color:#fff; }
+
+#inputArea { border-top:1px solid var(--glass-border); padding:12px 16px; position:relative; }
+.input-row { display:flex; gap:8px; align-items:flex-end; }
+#msgInput {
+  flex:1; padding:11px 13px; border:1px solid var(--glass-border); border-radius:10px;
+  background:var(--input-bg); color:var(--text); font-size:14px; transition:border .2s, box-shadow .2s;
+  resize:none; line-height:1.5; min-height:42px; max-height:120px; overflow-y:hidden;
+}
+#msgInput::placeholder { color:var(--text-faint); }
+#msgInput:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,139,245,.2); }
+/* 输入框字符计数 */
+#charCount { position:absolute; right:80px; bottom:8px; font-size:11px; color:var(--text-faint); pointer-events:none; }
+#charCount.over { color:var(--danger); }
+#sendBtn { padding:10px 22px; border-radius:10px; font-size:14px; font-weight:600; }
+.file-row { display:flex; gap:8px; margin-top:8px; align-items:center; }
+#emojiBtn { padding:9px 12px; border-radius:10px; background:var(--hover); font-size:17px; transition:transform .1s; }
+#emojiBtn:hover { transform:scale(1.1); }
+#pickFileBtn { padding:8px 14px; color:#fff; border-radius:10px; font-size:13px; background:linear-gradient(135deg,#0ea5e9,#22d3ee); box-shadow:0 5px 14px rgba(34,211,238,.3); }
+
+/* ===== 表情面板 ===== */
+#emojiPanel {
+  display:none; position:absolute; bottom:calc(100% + 10px); left:16px; width:320px;
+  max-height:60vh; overflow-y:auto; padding:12px;
+  background:var(--glass-strong); border:1px solid var(--glass-border); border-radius:14px;
+  backdrop-filter:blur(18px); z-index:50; box-shadow:0 16px 50px rgba(0,0,0,.4);
+  animation:cardIn .2s cubic-bezier(.16,1,.3,1);
+}
+#emojiGrid { display:grid; grid-template-columns:repeat(8,1fr); gap:4px; }
+#emojiGrid span { text-align:center; font-size:20px; padding:5px 0; border-radius:6px; cursor:pointer; transition:background .15s, transform .1s; }
+#emojiGrid span:hover { background:var(--hover); transform:scale(1.3); }
+
+/* ===== 群管理弹窗 ===== */
+.modal {
+  display:none; position:fixed; inset:0; background:rgba(5,10,20,.55);
+  backdrop-filter:blur(6px); align-items:center; justify-content:center; z-index:100;
+}
+.modal-card {
+  width:500px; max-height:80vh; background:var(--glass-strong); border:1px solid var(--glass-border);
+  border-radius:16px; backdrop-filter:blur(20px); display:flex; flex-direction:column; overflow:hidden;
+  box-shadow:0 24px 70px rgba(0,0,0,.5); animation:cardIn .3s cubic-bezier(.16,1,.3,1);
+}
+.modal-head { padding:16px 20px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; }
+.modal-head span { flex:1; font-size:16px; font-weight:700; }
+.modal-head button { padding:5px 12px; background:var(--hover); border-radius:8px; color:var(--text); }
+
+/* ===== 通用确认/输入弹窗（替代浏览器 confirm/prompt） ===== */
+#uiDialog { display:none; position:fixed; inset:0; background:rgba(5,10,20,.55);
+  backdrop-filter:blur(6px); align-items:center; justify-content:center; z-index:600; }
+#uiDialog.show { display:flex; }
+#uiDialog .dialog-card {
+  width:360px; background:var(--glass-strong); border:1px solid var(--glass-border);
+  border-radius:16px; backdrop-filter:blur(20px); padding:20px 22px;
+  box-shadow:0 24px 70px rgba(0,0,0,.5); animation:cardIn .3s cubic-bezier(.16,1,.3,1);
+}
+#uiDialog .dialog-title { font-size:15px; font-weight:700; margin-bottom:12px; }
+#uiDialog .dialog-msg { font-size:13px; color:var(--text-dim); line-height:1.6; margin-bottom:14px; white-space:pre-line; }
+#uiDialog .dialog-input {
+  width:100%; box-sizing:border-box; padding:10px 12px; margin-bottom:14px;
+  border:1px solid var(--glass-border); border-radius:10px; background:var(--input-bg);
+  color:var(--text); font-size:14px; transition:border .2s;
+}
+#uiDialog .dialog-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,139,245,.2); }
+#uiDialog .dialog-btns { display:flex; gap:10px; justify-content:flex-end; }
+#uiDialog .dialog-btns .btn { min-width:76px; }
+#gpBody { flex:1; overflow-y:auto; padding:12px 20px; }
+.gp-sec { font-size:13px; color:var(--text-dim); margin:14px 0 8px; font-weight:600; }
+.gp-member { display:flex; align-items:center; gap:10px; padding:8px 0; }
+.gp-name { flex:1; font-size:14px; }
+.gp-actions { display:flex; gap:4px; }
+.gp-foot { padding:12px 20px; border-top:1px solid var(--glass-border); display:flex; gap:8px; }
+.gp-foot .btn { flex:1; }
+.gp-foot .btn.warn { background:rgba(255,92,122,.2); color:var(--danger); }
+
+/* ===== 用户设置弹窗 ===== */
+.set-avatar { width:72px; height:72px; border-radius:50%; background:linear-gradient(135deg,#6a5cf5,#8b5cf6); color:#fff; font-size:30px; font-weight:700; display:flex; align-items:center; justify-content:center; margin:18px auto 10px; box-shadow:0 8px 24px rgba(106,92,245,.35); }
+.set-name { text-align:center; font-size:18px; font-weight:700; }
+.set-uid { text-align:center; color:var(--text-dim); font-size:13px; margin:4px 0 6px; }
+.set-tip { text-align:center; color:var(--text-faint); font-size:12px; margin:10px 0 4px; }
+
+/* ===== Toast ===== */
+#toastBox { position:fixed; top:18px; left:50%; transform:translateX(-50%); z-index:300; display:flex; flex-direction:column; gap:8px; align-items:center; }
+.toast {
+  position:relative; overflow:hidden; color:var(--text); padding:11px 20px; border-radius:12px;
+  font-size:13px; animation:toastIn .3s cubic-bezier(.16,1,.3,1); max-width:70vw;
+  background:var(--glass-strong); border:1px solid var(--glass-border);
+  backdrop-filter:blur(14px); box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+.toast::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent); }
+.toast.ok::before { background:var(--ok); }
+.toast.err::before { background:var(--danger); }
+.toast::after {
+  content:''; position:absolute; left:0; bottom:0; height:2px;
+  background:linear-gradient(90deg,var(--accent),var(--accent3));
+  animation:toastBar 2.6s linear forwards;
+}
+@keyframes toastBar { from{ width:100%;} to{ width:0%;} }
+@keyframes toastIn { from{ opacity:0; transform:translateY(-10px) scale(.96);} to{ opacity:1; transform:none;} }
+
+/* ===== 右键菜单 ===== */
+#ctxMenu {
+  display:none; position:fixed; z-index:500; min-width:150px; padding:6px;
+  background:var(--glass-strong); border:1px solid var(--glass-border); border-radius:12px;
+  backdrop-filter:blur(18px); box-shadow:0 14px 44px rgba(0,0,0,.45);
+  animation:cardIn .15s cubic-bezier(.16,1,.3,1);
+}
+#ctxMenu .ctx-item { padding:8px 12px; font-size:13px; border-radius:8px; cursor:pointer; color:var(--text); transition:background .12s; }
+#ctxMenu .ctx-item:hover { background:var(--hover); }
+#ctxMenu .ctx-item.danger:hover { background:rgba(255,92,122,.2); color:var(--danger); }
+#ctxMenu .ctx-sep { height:1px; background:var(--glass-border); margin:4px 6px; }
+</style>
+</head>
+<body>
+<canvas id="particles"></canvas>
+
+<!-- ===== 登录页 ===== -->
+<div id="loginPage">
+  <div class="login-card">
+    <div class="logo">💬</div>
+    <h1>ChatRoom</h1>
+    <div class="sub">即时通讯系统</div>
+    <input id="userInput" placeholder="用户名" autocomplete="off">
+    <input id="passInput" type="password" placeholder="密码">
+    <div class="btn-row">
+      <button id="loginBtn">登 录</button>
+      <button id="regBtn" class="reg">注 册</button>
+    </div>
+    <div class="err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- ===== 主界面 ===== -->
+<div id="mainPage">
+  <aside id="sidebar">
+    <div id="selfInfo">
+      <div class="my-avatar" id="myAvatar">U</div>
+      <div><div class="name" id="myName"></div><div class="uid" id="myUid"></div></div>
+    </div>
+    <div id="tabs">
+      <div class="tab active" data-tab="friends" onclick="switchTab('friends')">好友<span class="tab-badge" id="badgeFriends"></span></div>
+      <div class="tab" data-tab="groups" onclick="switchTab('groups')">群组<span class="tab-badge" id="badgeGroups"></span></div>
+      <div class="tab" data-tab="requests" onclick="switchTab('requests')">申请<span class="tab-badge" id="badgeReqs"></span></div>
+    </div>
+    <input id="searchBox" placeholder="搜索好友 / 群 / 申请…" autocomplete="off">
+    <div id="list"></div>
+    <div class="side-foot">
+      <div id="statBar">
+        <div class="stat-chip">好友 <b id="statFriends">0</b></div>
+        <div class="stat-chip">群组 <b id="statGroups">0</b></div>
+        <div class="stat-chip">在线 <b id="statOnline">0</b></div>
+      </div>
+      <div class="side-btns">
+        <button id="themeBtn">🌙 暗色</button>
+        <button id="settingsBtn">⚙️ 设置</button>
+      </div>
+    </div>
+  </aside>
+
+  <main id="mainPanel">
+    <header id="chatHeader">
+      <span id="chatTitle">请选择会话</span>
+      <button id="groupManageBtn" class="btn" style="display:none" onclick="openGroupPanel()">群管理</button>
+    </header>
+    <div id="messages"></div>
+    <div id="dropMask"><div class="drop-title">松开以上传到当前会话</div><div class="drop-name" id="dropName"></div></div>
+    <div id="inputArea">
+      <div class="input-row">
+        <button id="emojiBtn" title="表情" onclick="toggleEmoji()">😊</button>
+        <textarea id="msgInput" rows="1" placeholder="Enter 发送 · Shift+Enter 换行" autocomplete="off"></textarea>
+        <button id="sendBtn" class="primary" onclick="sendMessage()">发送</button>
+        <span id="charCount">0/5000</span>
+      </div>
+      <div class="file-row">
+        <button id="pickFileBtn" onclick="pickFile()">📁 选择文件</button>
+        <input type="file" id="fileInput" style="display:none">
+      </div>
+      <div id="emojiPanel">
+        <div id="emojiGrid"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ===== 群管理弹窗 ===== -->
+<div id="groupModal" class="modal" onclick="if(event.target===this)closeGroupPanel()">
+  <div class="modal-card">
+    <div class="modal-head"><span id="gpTitle">群管理</span><button onclick="closeGroupPanel()">关闭</button></div>
+    <div id="gpBody"></div>
+  </div>
+</div>
+
+<!-- ===== 用户设置弹窗（预留昵称/头像等扩展位） ===== -->
+<div id="settingsModal" class="modal" onclick="if(event.target===this)closeSettings()">
+  <div class="modal-card">
+    <div class="modal-head"><span>设置</span><button onclick="closeSettings()">关闭</button></div>
+    <div style="flex:1; overflow-y:auto; padding:12px 20px;">
+      <div class="set-avatar" id="setAvatar">U</div>
+      <div class="set-name" id="setName"></div>
+      <div class="set-uid" id="setUid"></div>
+      <div class="set-tip">即将支持：昵称 / 头像 等更多设置</div>
+    </div>
+    <div class="gp-foot">
+      <button class="btn" id="settingsLogoutBtn">退出登录</button>
+      <button class="btn warn" id="settingsDelBtn">注销账户</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 通用确认/输入弹窗 ===== -->
+<div id="uiDialog">
+  <div class="dialog-card">
+    <div class="dialog-title" id="uiDlgTitle"></div>
+    <div class="dialog-msg" id="uiDlgMsg"></div>
+    <input class="dialog-input" id="uiDlgInput" style="display:none" autocomplete="off">
+    <div class="dialog-btns">
+      <button class="btn" id="uiDlgCancel">取消</button>
+      <button class="btn primary" id="uiDlgOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 图片预览灯箱：支持左右切换 + 悬停显示下载/关闭 -->
+<div id="lightbox" class="modal" onclick="if(event.target===this)closeLightbox()">
+  <button class="lb-btn lb-prev" onclick="lbSwitch(-1)">‹</button>
+  <img id="lightboxImg" onclick="event.stopPropagation()">
+  <button class="lb-btn lb-next" onclick="lbSwitch(1)">›</button>
+  <div class="lb-ctrl" onclick="event.stopPropagation()">
+    <button class="lb-btn ctrl" onclick="lbDownload()">⤓ 保存</button>
+    <button class="lb-btn ctrl" onclick="closeLightbox()">✕</button>
+  </div>
+</div>
+
+<!-- 右键菜单 -->
+<div id="ctxMenu"></div>
+
+<!-- 加载遮罩 -->
+<div id="loading"><div class="spinner"></div><p>正在加载…</p></div>
+
+<!-- 客户端离线遮罩：心跳检测到客户端进程已停止时显示 -->
+<div id="clientDown">
+  <div class="cd-icon">📡</div>
+  <p>客户端已停止运行</p>
+  <div class="cd-sub">请重启聊天客户端程序后，页面将自动恢复</div>
+</div>
+
+<div id="toastBox"></div>
+
+<script>
+// ================== 状态 ==================
+const S = {
+  self: null,
+  tab: 'friends',
+  active: null,            // {kind:'private'|'group', id, name}
+  friends: [],
+  groups: [],
+  friendReqs: [],
+  blocked: new Set(),
+  rendered: new Set(),     // 已渲染的 message_id（每打开一个会话清空）
+  lastDateKey: '',         // 当前已显示分隔的固定日期键 YYYY-MM-DD（跨增量加载延续，避免重复"今天"）
+  lastTimeKey: 0,          // 最后一条已渲染消息的 time（用于同天内按 30 分钟间隔插时间条）
+  msgCache: [],            // 当前会话全量消息缓存（按时间升序）
+  msgStart: 0,             // 已渲染窗口的起始索引（小于此的为更早未加载）
+  msgHasMore: false,       // 是否还有更早消息未加载
+  groupMembers: {},        // gid -> {uid: name} 群成员名缓存（方案A：实时预览查发送者名）
+  unread: {},              // key -> 未读数
+  myPerm: {},              // 各群自己权限缓存 {gid:permission}
+  groupJoinReqs: {},       // gid -> 入群申请列表（登录同步 + push 增量）
+  lastLogoutTime: 0,       // 新增：上次下线时刻（服务端下发，标记离线新消息）
+  offlineSepDone: false,   // 新增：当前会话是否已插入"离线消息"分隔线
+  groupPanel: null,
+  uploading: false,        // 是否有进行中的上传（同一时刻最多一个，进度条全局唯一）
+};
+let ws = null;
+let dlActive=false;   // 是否有下载进行中（file_progress 据此定位到气泡）
+let dlCard=null;      // 当前下载对应的文件气泡元素
+let upMsg=null;       // 当前上传的本地临时消息（乐观气泡定位）
+const MSG_PAGE = 50;   // 消息窗口大小：进入会话/向上加载时的批量条数
+
+// ================== 工具 ==================
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// 生成 JS 字符串字面量（单引号包裹，适配 onclick="..." 双引号属性）
+// JSON.stringify 先处理反斜杠/换行/双引号，再换成单引号包裹并转义内部单引号
+function jsStr(s){
+  const j = JSON.stringify(String(s==null?'':s));  // 双引号包裹、内部已转义
+  const inner = j.slice(1,-1);
+  return "'" + inner.replace(/'/g,"\\'") + "'";
+}
+function fmtSize(b){ if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(2)+' MB'; }
+function fmtTime(t){ const d=new Date(Number(t)); const p=n=>String(n).padStart(2,'0'); return p(d.getHours())+':'+p(d.getMinutes()); }
+function isImage(name){ return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name||''); }
+function keyOf(kind,id){ return (kind==='private'?'p':'g')+id; }
+async function api(path,body){
+  const r = await fetch(path, {
+    method: body?'POST':'GET',
+    headers: body?{'Content-Type':'application/json'}:undefined,
+    body: body?JSON.stringify(body):undefined,
+  });
+  return r.json();
+}
+function toast(msg,type){
+  const box=document.getElementById('toastBox');
+  const el=document.createElement('div');
+  el.className='toast'+(type?' '+type:'');
+  el.textContent=msg;
+  box.appendChild(el);
+  setTimeout(()=>{
+    el.style.transition='opacity .3s, transform .3s';
+    el.style.opacity='0'; el.style.transform='translateY(-8px)';
+    setTimeout(()=>el.remove(), 320);
+  }, 2600);
+}
+// ===== 通用确认/输入弹窗（替代浏览器 confirm/prompt） =====
+// uiConfirm(title, msg) -> Promise<bool>；uiPrompt(title, msg, placeholder) -> Promise<string|null>
+function uiDialogShow(opts){
+  return new Promise(resolve=>{
+    const dlg=document.getElementById('uiDialog');
+    document.getElementById('uiDlgTitle').textContent=opts.title||'';
+    document.getElementById('uiDlgMsg').textContent=opts.msg||'';
+    document.getElementById('uiDlgMsg').style.display=opts.msg?'block':'none';
+    const inp=document.getElementById('uiDlgInput');
+    if(opts.input){ inp.style.display='block'; inp.placeholder=opts.placeholder||''; inp.value=''; }
+    else inp.style.display='none';
+    dlg.classList.add('show');
+    if(opts.input) setTimeout(()=>inp.focus(), 50);
+    let done=false;
+    const finish=v=>{ if(done) return; done=true; dlg.classList.remove('show'); resolve(v); };
+    const okBtn=document.getElementById('uiDlgOk'), cancelBtn=document.getElementById('uiDlgCancel');
+    // 重置按钮状态（防止 uiInfo 残留的"关闭"/隐藏取消 污染确认框）
+    okBtn.textContent='确定'; cancelBtn.textContent='取消'; cancelBtn.style.display='';
+    okBtn.onclick=()=>{
+      if(opts.input){ const v=inp.value.trim(); if(!v) return; finish(v); }
+      else finish(true);
+    };
+    cancelBtn.onclick=()=>finish(opts.input?null:false);
+    inp.onkeydown=e=>{ if(e.key==='Enter') okBtn.click(); if(e.key==='Escape') cancelBtn.click(); };
+  });
+}
+function uiConfirm(title,msg){ return uiDialogShow({title,msg}); }
+function uiPrompt(title,msg,placeholder){ return uiDialogShow({title,msg,placeholder,input:true}); }
+// 当前 uiInfo 弹窗的关闭函数（供操作成功后主动关闭）
+let _uiInfoClose=null;
+// 信息展示弹窗（复用 uiDialog 容器，仅一个“关闭”按钮；关闭时恢复按钮/输入框状态）
+function uiInfo(title,html){
+  const dlg=document.getElementById('uiDialog');
+  const msg=document.getElementById('uiDlgMsg');
+  const ok=document.getElementById('uiDlgOk'), cancel=document.getElementById('uiDlgCancel'), inp=document.getElementById('uiDlgInput');
+  document.getElementById('uiDlgTitle').textContent=title;
+  msg.style.whiteSpace='normal';
+  msg.innerHTML=html;
+  inp.style.display='none';
+  cancel.style.display='none';
+  ok.textContent='关闭';
+  const close=()=>{
+    dlg.classList.remove('show');
+    msg.innerHTML=''; msg.style.whiteSpace='';
+    cancel.style.display=''; cancel.textContent='取消';
+    ok.textContent='确定';
+    _uiInfoClose=null;
+  };
+  _uiInfoClose=close;
+  ok.onclick=close; cancel.onclick=close;
+  dlg.classList.add('show');
+}
+// 群聊点击成员头像：弹出该成员信息（用户名/UID/加群时间/权限 + 管理操作按钮）
+async function showMemberInfo(gid,uid){
+  let members=null;
+  try{
+    const r=await api('/api/group/members?gid='+gid);
+    if(r.status===0 && Array.isArray(r.members)) members=r.members;
+  }catch(_){}
+  const info = members ? (members.find(m=>m.uid===uid)||null) : null;
+  if(!info){ toast('未找到该成员信息','err'); return; }
+  const me=members.find(x=>x.uid===S.self.uid);
+  const selfPerm=me?me.permission:2;
+  const permName=['群主','管理员','成员'];
+  const t=new Date(info.join_time||0);
+  const pad=n=>String(n).padStart(2,'0');
+  const timeStr=isNaN(t.getTime())?'-':`${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+  const h=(uid*47)%360;
+  // 管理操作按钮（权限不足不显示；规则与群管理面板一致，与后端校验对齐）
+  let acts='';
+  if(uid!==S.self.uid){
+    if(selfPerm===0 && info.permission===2) acts+=`<button class="btn tiny" onclick="memberSetAdmin(${gid},${uid},true)">设为管理</button>`;
+    if(selfPerm===0 && info.permission===1) acts+=`<button class="btn tiny" onclick="memberSetAdmin(${gid},${uid},false)">取消管理</button>`;
+    if(selfPerm<=1 && info.permission===2) acts+=`<button class="btn tiny warn" onclick="memberKick(${gid},${uid})">踢出群聊</button>`;
+  }
+  const html=`
+    <div class="mi-head">
+      <div class="mi-av" style="background:linear-gradient(135deg,hsl(${h},72%,56%),hsl(${(h+42)%360},72%,50%))">${esc((info.usr_name||'?')[0].toUpperCase())}</div>
+      <div class="mi-title">${esc(info.usr_name||'')}${info.uid===S.self.uid?'<span class="mi-me">(我)</span>':''}</div>
+    </div>
+    <div class="mi-row"><span>UID</span><b>#${info.uid}</b></div>
+    <div class="mi-row"><span>加群时间</span><b>${timeStr}</b></div>
+    <div class="mi-row"><span>权限</span><b class="tag p${info.permission}">${permName[info.permission]||'?'}</b></div>
+    ${acts?`<div class="mi-acts">${acts}</div>`:''}`;
+  uiInfo('成员信息', html);
+}
+// 成员信息弹窗操作：设/取消管理员（成功后刷新弹窗）
+async function memberSetAdmin(gid,uid,isAdmin){
+  const r=await api('/api/group/set_admin',{gid,target_uid:uid,is_admin:isAdmin});
+  if(r.status===0){ toast(isAdmin?'已设为管理员':'已取消管理员','ok'); showMemberInfo(gid,uid); }
+  else toast('操作失败：权限不足或成员已变化','err');
+}
+// 成员信息弹窗操作：踢出群聊（成功后关闭弹窗）
+async function memberKick(gid,uid){
+  const ok=await uiConfirm('踢出群聊','确定将该成员移出群聊？');
+  if(!ok) return;
+  const r=await api('/api/group/kick',{gid,target_uid:uid});
+  if(r.status===0){ toast('已移出群聊','ok'); if(_uiInfoClose) _uiInfoClose(); }
+  else toast('操作失败：权限不足或成员已变化','err');
+}
+// ===== 新消息提示音（已移除系统通知弹窗，仅保留音频） =====
+function notifyUser(title,body){
+  // 仅当页面不可见（切到别的标签页/窗口）时才响提示音，避免打扰正在看的用户
+  if(!document.hidden) return;
+  // 提示音（无文件时用 WebAudio 生成短哔声）
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.frequency.value=880; o.type='sine';
+    g.gain.setValueAtTime(0.08, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.25);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime+0.25);
+    setTimeout(()=>ctx.close(), 500);
+  }catch(_){}
+}
+function scrollBottom(){ const m=document.getElementById('messages'); m.scrollTop=m.scrollHeight; }
+// ===== 聊天滚动贴底控制 =====
+// stickToBottom: 是否应始终保持在最底部。
+//   - 打开会话/发消息/自己贴底时收到新消息 -> true
+//   - 用户主动向上滚动 -> false（之后收到新消息不再强拉）
+// nearBottom(m): 判断当前是否贴底（8px 容差，鼠标滚轮/触控板惯性不会误判）
+let stickToBottom=true;
+let sepInserted=false;   // 当前"离开底部→新消息"批次是否已插入分隔线（只插第一条）
+function nearBottom(m){ return m.scrollHeight - m.scrollTop - m.clientHeight < 8; }
+function scrollToBottomIfStick(){
+  if(!stickToBottom) return;
+  const m=document.getElementById('messages');
+  if(m) m.scrollTop=m.scrollHeight;
+}
+// 图片等异步内容加载会撑高容器，此时若仍应贴底，用防抖在布局稳定后校正位置
+let stickTimer=null;
+function debounceStick(){
+  if(stickTimer) clearTimeout(stickTimer);
+  stickTimer=setTimeout(()=>{ stickTimer=null; scrollToBottomIfStick(); }, 120);
+}
+// 图片加载完成（可能撑高容器）时校正：仅当仍处于贴底状态才滚到底，不打扰用户阅读
+function stickAfterImgLoad(){
+  // 占位模式：加载完成后移除占位样式，恢复 object-fit:contain（保持原比例显示，不裁切）
+  this && this.classList && this.classList.remove('ph');
+  if(stickToBottom) debounceStick();
+}
+// 文本自动识别链接 + 保留换行
+function linkify(text){
+  const urlRe=/(https?:\/\/[^\s<>"'()]+)/g;
+  return esc(text).replace(urlRe, '<a href="$1" target="_blank" rel="noopener">$1</a>').replace(/\n/g,'<br>');
+}
+// 消息日期分组标题
+function dateTitle(ts){
+  const d=new Date(Number(ts)); const now=new Date();
+  const same=y=> y.getFullYear()===d.getFullYear() && y.getMonth()===d.getMonth() && y.getDate()===d.getDate();
+  if(same(now)) return '今天';
+  const y=new Date(now); y.setDate(now.getDate()-1);
+  if(same(y)) return '昨天';
+  const p=n=>String(n).padStart(2,'0');
+  return (d.getFullYear()===now.getFullYear()?'':d.getFullYear()+'年')+p(d.getMonth()+1)+'月'+p(d.getDate())+'日';
+}
+// 固定日期键 YYYY-MM-DD：跨天判断依据（与显示文本"今天/昨天"无关，避免跨天混淆）
+function dateKey(ts){
+  const d=new Date(Number(ts));
+  const p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+}
+// 0 点定时器：跨天后自动重渲染当前会话（"昨天"→"今天"、日期分隔刷新）
+function scheduleMidnightRefresh(){
+  const now=new Date();
+  const next=new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 0, 0, 2); // 次日 00:00:02
+  setTimeout(()=>{
+    if(S.active){
+      S.rendered.clear(); S.lastDateKey=''; S.lastTimeKey=0;
+      document.getElementById('messages').innerHTML='';
+      loadMessages();
+    }
+    scheduleMidnightRefresh();   // 循环调度下一天
+  }, next.getTime()-now.getTime());
+}
+// 加载遮罩
+function showLoading(){ document.getElementById('loading').classList.add('show'); }
+function hideLoading(){ document.getElementById('loading').classList.remove('show'); }
+// 侧栏统计
+function updateStat(){
+  document.getElementById('statFriends').textContent=S.friends.length;
+  document.getElementById('statGroups').textContent=S.groups.length;
+  document.getElementById('statOnline').textContent=S.friends.filter(f=>f.online).length;
+}
+// 主题切换（localStorage 记忆）
+function applyTheme(t){
+  document.body.dataset.theme=t;
+  document.getElementById('themeBtn').textContent = t==='dark' ? '☀️ 亮色' : '🌙 暗色';
+  try{ localStorage.setItem('chatroom_theme', t); }catch(_){}
+}
+function toggleTheme(){ applyTheme(document.body.dataset.theme==='dark'?'light':'dark'); }
+// 表情面板
+const EMOJIS=['😀','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','😉','😍','😘','😋','😜','🤔','🤗','🤩','😎','🥳','😢','😭','😡','🤯','😴','👍','👎','👏','🙏','💪','🤝','❤️','💔','🔥','✨','🎉','🎊','💯','👀','🚀','🌹','☕','🍺','🎵','⚡','🌸','⭐','✅'];
+let emojiOpen=false;
+function toggleEmoji(){
+  emojiOpen=!emojiOpen;
+  document.getElementById('emojiPanel').style.display=emojiOpen?'block':'none';
+}
+// 鼠标离开按钮/面板后自动关闭（延迟判断，避免鼠标移向面板的间隙被误关）
+function maybeCloseEmoji(){
+  setTimeout(()=>{
+    const panel=document.getElementById('emojiPanel');
+    const btn=document.getElementById('emojiBtn');
+    if(panel.style.display==='block' && !panel.matches(':hover') && !btn.matches(':hover')){
+      emojiOpen=false;
+      panel.style.display='none';
+    }
+  }, 180);
+}
+function insertEmoji(e){
+  const inp=document.getElementById('msgInput');
+  inp.value+=e;
+  if(msgCharCount(inp.value)>MSG_MAX_LEN) inp.value=truncateLen(inp.value,MSG_MAX_LEN);   // 表情插入同样受硬限制
+  inp.focus();
+  autoResizeInput(); saveDraft();   // 与输入监听一致：自适应高度 + 保存草稿
+  updateCharCount();   // 表情计入字符数
+}
+function initEmoji(){
+  const grid=document.getElementById('emojiGrid');
+  grid.innerHTML=EMOJIS.map(e=>`<span onclick="insertEmoji('${e}')">${e}</span>`).join('');
+  const panel=document.getElementById('emojiPanel');
+  const btn=document.getElementById('emojiBtn');
+  btn.addEventListener('mouseleave', maybeCloseEmoji);
+  panel.addEventListener('mouseleave', maybeCloseEmoji);
+}
+// 右键菜单
+function showCtx(x,y,items){
+  const m=document.getElementById('ctxMenu');
+  m.innerHTML='';
+  items.forEach(it=>{
+    if(it==='-'){ const s=document.createElement('div'); s.className='ctx-sep'; m.appendChild(s); return; }
+    const d=document.createElement('div');
+    d.className='ctx-item'+(it.cls?' '+it.cls:'');
+    d.textContent=it.label;
+    d.addEventListener('click',()=>{ hideCtx(); it.fn&&it.fn(); });
+    m.appendChild(d);
+  });
+  m.style.display='block';
+  const r=m.getBoundingClientRect();
+  m.style.left=Math.max(4, Math.min(x, window.innerWidth-r.width-8))+'px';
+  m.style.top =Math.max(4, Math.min(y, window.innerHeight-r.height-8))+'px';
+}
+function hideCtx(){ document.getElementById('ctxMenu').style.display='none'; }
+// 关闭所有弹窗/覆盖层（断线重连、回到登录页时统一清理，避免弹窗残留）
+function closeAllModals(){
+  const dlg=document.getElementById('uiDialog');
+  if(dlg) dlg.classList.remove('show');
+  // 恢复 uiDialog 按钮/输入框默认状态（防残留“关闭”等）
+  const ok=document.getElementById('uiDlgOk'), cancel=document.getElementById('uiDlgCancel');
+  const inp=document.getElementById('uiDlgInput'), msg=document.getElementById('uiDlgMsg');
+  if(ok) ok.textContent='确定';
+  if(cancel){ cancel.style.display=''; cancel.textContent='取消'; }
+  if(msg){ msg.innerHTML=''; msg.style.whiteSpace=''; }
+  if(inp) inp.style.display='none';
+  _uiInfoClose=null;
+  closeGroupPanel();   // 群管理弹窗
+  closeSettings();     // 设置弹窗
+  closeLightbox();     // 图片大图
+  if(emojiOpen){ emojiOpen=false; document.getElementById('emojiPanel').style.display='none'; }
+  hideCtx();           // 右键菜单
+}
+function copyText(t){ try{ navigator.clipboard.writeText(t); }catch(_){} }
+// 粒子背景动画（登录页显示；主界面隐藏+暂停，控制函数见 setParticlesVisible）
+let setParticlesVisible=null;
+function initParticles(){
+  const canvas=document.getElementById('particles');
+  if(!canvas) return;
+  const ctx=canvas.getContext('2d');
+  let W,H,ps=[],running=true,last=0;
+  // 发热优化：减少粒子数（桌面 60→36，移动 30→20）
+  const N=window.innerWidth<800?20:36;
+  function resize(){ W=canvas.width=window.innerWidth; H=canvas.height=window.innerHeight; }
+  resize(); window.addEventListener('resize',resize);
+  for(let i=0;i<N;i++){
+    ps.push({x:Math.random()*W, y:Math.random()*H, vx:(Math.random()-.5)*.4, vy:(Math.random()-.5)*.4, r:Math.random()*1.8+.6});
+  }
+  // 发热优化：页面不可见时暂停（仅当粒子可见时控制，主界面隐藏状态不受影响）
+  document.addEventListener('visibilitychange', ()=>{
+    if(canvas.style.display === 'none') return;
+    running = !document.hidden;
+    if(running) requestAnimationFrame(step);
+  });
+  function step(ts){
+    if(!running) return;          // 暂停：不再调度
+    // 发热优化：降帧到约 30fps（静止时不再满帧空转）
+    if(ts - last < 33){ requestAnimationFrame(step); return; }
+    last = ts;
+    ctx.clearRect(0,0,W,H);
+    for(const p of ps){
+      p.x+=p.vx; p.y+=p.vy;
+      if(p.x<0||p.x>W) p.vx*=-1;
+      if(p.y<0||p.y>H) p.vy*=-1;
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.fillStyle='rgba(140,180,255,.5)'; ctx.fill();
+    }
+    for(let i=0;i<ps.length;i++) for(let j=i+1;j<ps.length;j++){
+      const a=ps[i],b=ps[j];
+      const dx=a.x-b.x, dy=a.y-b.y;
+      const d=dx*dx+dy*dy;
+      if(d<14400){
+        ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
+        ctx.strokeStyle='rgba(120,170,255,'+(0.35*(1-Math.sqrt(d)/120))+')';
+        ctx.lineWidth=.6; ctx.stroke();
+      }
+    }
+    requestAnimationFrame(step);
+  }
+  // 登录页显示粒子，主界面隐藏+暂停（发热优化）
+  setParticlesVisible = function(on){
+    canvas.style.display = on?'block':'none';
+    running = on;
+    if(on){ last=0; requestAnimationFrame(step); }
+  };
+  requestAnimationFrame(step);
+}
+
+// ================== 登录 / 注册 ==================
+// 用户名/密码长度限制（码点计数，中英文都算1个）
+const USER_MAX = 20, PASS_MAX = 32;
+// 码点安全截断（emoji 等代理对不会切断）
+function truncateLen(s,max){ const a=[...s]; return a.length>max?a.slice(0,max).join(''):s; }
+// 硬性上限：达到上限后字符不增加（键盘输入、粘贴、拖拽、输入法组合都拦截）
+function hardLimit(el,max){
+  el.addEventListener('input',()=>{
+    if([...el.value].length>max){
+      el.value=truncateLen(el.value,max);
+      try{ el.setSelectionRange(el.value.length,el.value.length); }catch(_){}
+    }
+  });
+}
+function checkLenLimits(){
+  const u=document.getElementById('userInput').value, p=document.getElementById('passInput').value;
+  const err=document.getElementById('loginErr');
+  // 越界：明确提示（提交也会被阻止）
+  if([...u].length > USER_MAX){ err.textContent='用户名不能超过 '+USER_MAX+' 字'; return; }
+  if([...p].length > PASS_MAX){ err.textContent='密码不能超过 '+PASS_MAX+' 位'; return; }
+  // 快越界/已满：温和提醒（仅当当前无其他错误信息时）
+  if([...u].length >= USER_MAX-2 || [...p].length >= PASS_MAX-2){
+    if([...u].length >= USER_MAX) err.textContent='用户名已达上限（'+USER_MAX+' 字）';
+    else if([...u].length >= USER_MAX-2) err.textContent='用户名即将达到上限（'+USER_MAX+' 字）';
+    if([...p].length >= PASS_MAX) err.textContent='密码已达上限（'+PASS_MAX+' 位）';
+    else if([...p].length >= PASS_MAX-2) err.textContent='密码即将达到上限（'+PASS_MAX+' 位）';
+    return;
+  }
+  // 回到安全区：若当前是长度提醒则清除
+  if(err.textContent && (err.textContent.includes('即将达到上限')||err.textContent.includes('已达上限')||err.textContent.includes('不能超过'))) err.textContent='';
+}
+async function doLogin(){
+  const u=document.getElementById('userInput').value.trim();
+  const p=document.getElementById('passInput').value;
+  const err=document.getElementById('loginErr');
+  if(!u||!p){ err.textContent='请输入用户名和密码'; return; }
+  if([...u].length > USER_MAX){ err.textContent='用户名不能超过 '+USER_MAX+' 字'; return; }
+  if([...p].length > PASS_MAX){ err.textContent='密码不能超过 '+PASS_MAX+' 位'; return; }
+  const btn=document.getElementById('loginBtn'); btn.classList.add('loading');
+  try{
+    const r=await api('/api/login',{username:u,password:p});
+    if(r.status===0){
+      S.self={uid:r.uid, username:r.username};
+      S.lastLogoutTime = r.last_logout_time||0;
+      err.textContent='';
+      showLoading();
+      enterApp();
+      toast('欢迎回来，'+r.username,'ok');
+    } else err.textContent='用户名或密码错误';
+  } catch(_){ err.textContent='网络错误，请重试'; }
+  finally { btn.classList.remove('loading'); }
+}
+async function doRegister(){
+  const u=document.getElementById('userInput').value.trim();
+  const p=document.getElementById('passInput').value;
+  const err=document.getElementById('loginErr');
+  if(!u||!p){ err.textContent='请输入用户名和密码'; return; }
+  if([...u].length > USER_MAX){ err.textContent='用户名不能超过 '+USER_MAX+' 字'; return; }
+  if([...p].length > PASS_MAX){ err.textContent='密码不能超过 '+PASS_MAX+' 位'; return; }
+  const btn=document.getElementById('regBtn'); btn.classList.add('loading');
+  try{
+    const r=await api('/api/register',{username:u,password:p});
+    if(r.status===0){
+      S.self={uid:r.uid, username:r.username};
+      S.lastLogoutTime = r.last_logout_time||0;
+      err.textContent='';
+      showLoading();
+      enterApp();
+      toast('注册成功，欢迎加入！','ok');
+    } else err.textContent='注册失败（用户名可能已存在）';
+  } catch(_){ err.textContent='网络错误，请重试'; }
+  finally { btn.classList.remove('loading'); }
+}
+// 清空本地会话状态并回到登录页（登出 / 注销共用）
+function resetUI(){
+  // 登出/注销：清空所有草稿（属于该用户的会话输入缓存）
+  if(S.self) try{ Object.keys(localStorage).filter(k=>k.startsWith('chatroom_draft_'+S.self.uid)).forEach(k=>localStorage.removeItem(k)); }catch(_){}
+  S.self=null; S.active=null; S.friends=[]; S.groups=[]; S.friendReqs=[]; S.unread={}; S.myPerm={}; S.groupJoinReqs={}; S.rendered.clear();
+  S.uploading=false; dlActive=false; dlCard=null; upMsg=null;   // 清理传输状态（防登出时残留卡死）
+  S.lastLogoutTime=0; S.offlineSepDone=false;
+  if(ws){ ws.onclose=null; ws.close(); }
+  stopHeartbeat();
+  document.getElementById('mainPage').style.display='none';
+  document.getElementById('loginPage').style.display='flex';
+  if(setParticlesVisible) setParticlesVisible(true);   // 回到登录页：恢复粒子动画
+  document.getElementById('msgInput').value='';
+  document.getElementById('inputArea').style.display='';
+  document.getElementById('messages').innerHTML='';
+  document.getElementById('chatTitle').textContent='请选择会话';
+  document.getElementById('groupManageBtn').style.display='none';
+  closeAllModals();
+}
+async function doLogout(){
+  resetUI();
+  api('/api/logout', {});   // 传个空对象让它走 POST（WebUI 只注册了 POST）
+  toast('已退出登录');
+}
+// 注销账户：需输入密码确认，成功后服务端会删除数据并断开连接
+async function delAccount(){
+  const ok=await uiConfirm('注销账户','注销账户将永久删除账号、好友关系、聊天记录与文件，且无法恢复，确定继续吗？');
+  if(!ok) return;
+  const pwd=await uiPrompt('注销账户','请输入密码确认注销：','密码');
+  if(!pwd) return;
+  let r=null;
+  try{ r=await api('/api/account/delete',{password:pwd}); }
+  catch(_){ toast('注销失败：网络错误','err'); return; }
+  if(r.status===0){
+    resetUI();
+    toast('账户已注销','ok');
+  } else {
+    toast('注销失败：密码错误或服务端拒绝','err');
+  }
+}
+
+// ================== 进入主界面 ==================
+async function enterApp(){
+  if(setParticlesVisible) setParticlesVisible(false);   // 进入主界面：隐藏并暂停粒子动画
+  document.getElementById('loginPage').style.display='none';
+  document.getElementById('mainPage').style.display='flex';
+  document.getElementById('myName').textContent=S.self.username;
+  document.getElementById('myUid').textContent='UID: '+S.self.uid;
+  document.getElementById('myAvatar').textContent=(S.self.username||'?')[0].toUpperCase();
+  connectWs();
+  startHeartbeat();
+  scheduleMidnightRefresh();   // 跨天自动刷新日期分隔
+  // 任一加载失败也结束 loading（网络抖动时不让页面卡在加载遮罩）
+  try{ await Promise.all([loadFriends(),loadGroups(),loadFriendReqs(),loadBlocks(),loadJoinReqs()]); }
+  catch(_){}
+  renderList();
+  updateStat();
+  hideLoading();
+}
+function connectWs(){
+  ws=new WebSocket('ws://'+location.host+'/ws');
+  ws.onmessage=e=>{ try{ handlePush(JSON.parse(e.data)); }catch(_){} };
+  ws.onclose=()=>{ closeAllModals(); if(S.self) setTimeout(connectWs, 2000); };
+}
+
+// ================== 心跳检测 ==================
+// 定时请求 /api/ping 检测客户端进程是否存活。
+// 使用 localhost 回环，判定可严苛：间隔 1.5s，连续失败 2 次即判定客户端停止。
+let heartMiss = 0;          // 连续失败次数
+let heartTimer = null;
+let needSessionCheck = false;   // 是否需要重新检查登录状态（任何一次失败即标记，恢复后反复重试直到成功）
+const HEART_INTERVAL = 1500;
+const HEART_MAX_MISS = 2;
+function setClientDown(on){
+  document.getElementById('clientDown').classList.toggle('show', !!on);
+}
+// 重新检查登录状态：
+// 客户端进程重启后是新进程，内存里的登录态（ctx_）已丢失，需回到登录页重新登录。
+// 返回 true 表示已拿到有效响应（结束重试），false 表示本次失败（保留标记下次再试）。
+async function checkSessionAfterReconnect(){
+  try{
+    const r = await api('/api/session');
+    needSessionCheck = false;   // 拿到有效响应 → 结束重试
+    if(r.status===0){
+      // 登录态仍在（例如只是短暂断连，进程未重启）：若前端还没 S.self 则补全
+      S.lastLogoutTime = r.last_logout_time||0;
+      if(!S.self){
+        S.self={uid:r.uid, username:r.username};
+        showLoading();
+        enterApp();
+      }
+    } else {
+      // 登录态丢失：客户端已重启（新进程），回到登录页
+      if(S.self){
+        resetUI();
+        toast('客户端已重启，请重新登录','err');
+      }
+    }
+  }catch(_){
+    // 响应未就绪（客户端刚重启 HTTP 未起）→ 保留 needSessionCheck，下次 ping 成功再试
+  }
+}
+function heartBeat(){
+  fetch('/api/ping', {cache:'no-store'})
+    .then(r=>{
+      // 服务端响应（无论业务状态码）都说明进程活着
+      if(r.ok || r.status>=400){
+        heartMiss=0; setClientDown(false);
+        if(needSessionCheck) checkSessionAfterReconnect();   // 需要检查则反复重试直到成功
+      }
+      else { heartMiss++; needSessionCheck=true; }
+    })
+    .catch(()=>{ heartMiss++; needSessionCheck=true; });   // 网络层失败：进程可能已停止
+  if(heartMiss >= HEART_MAX_MISS) setClientDown(true);
+}
+function startHeartbeat(){ if(!heartTimer) heartTimer=setInterval(heartBeat, HEART_INTERVAL); heartBeat(); }
+function stopHeartbeat(){ if(heartTimer){ clearInterval(heartTimer); heartTimer=null; } heartMiss=0; needSessionCheck=false; setClientDown(false); }
+
+// ================== 数据加载 ==================
+async function loadFriends(){
+  const r=await api('/api/friends');
+  if(r.status===0){
+    S.friends=(r.friends||[]).sort((a,b)=>(b.last_time||0)-(a.last_time||0));
+    // 未读红点：以服务端 status 未读数为准（覆盖，而不是叠加）
+    for(const f of S.friends){
+      S.unread[keyOf('private',f.uid)] = f.unread||0;
+    }
+  }
+}
+async function loadGroups(){
+  const r=await api('/api/groups');
+  if(r.status!==0) return;
+  S.groups=(r.groups||[]).sort((a,b)=>(b.last_time||0)-(a.last_time||0));
+  // 未读红点：以服务端 status 未读数为准
+  for(const g of S.groups){
+    S.unread[keyOf('group',g.group_id)] = g.unread||0;
+  }
+  await Promise.all(S.groups.map(async g=>{
+    if(g.history){ S.groupMembers[g.group_id]={}; return; }
+    try{
+      const mr=await api('/api/group/members?gid='+g.group_id);
+      if(mr.status===0 && mr.members){
+        g.member_count=mr.members.length;
+        const nmap={};
+        for(const m of mr.members){
+          nmap[m.uid]=m.usr_name||'';
+          if(m.uid===S.self.uid){ S.myPerm[g.group_id]=m.permission; }
+        }
+        S.groupMembers[g.group_id]=nmap;
+      } else {
+        g.member_count=null;
+        S.groupMembers[g.group_id]={};
+      }
+    }catch(_){ g.member_count=null; S.groupMembers[g.group_id]={}; }
+  }));
+}
+async function loadFriendReqs(){ const r=await api('/api/friend/requests'); if(r.status===0) S.friendReqs=r.requests; }
+async function loadBlocks(){ const r=await api('/api/friend/blocks'); if(r.status===0) S.blocked=new Set(r.blocks); }
+// 登录/权限变化时同步：一次拉取我管理的所有群的入群申请
+async function loadJoinReqs(){
+  try{
+    const r=await api('/api/group/join_requests/all');
+    if(r.status!==0) return;
+    const m={};
+    for(const g of (r.groups||[])) m[g.gid]=g.requests||[];
+    S.groupJoinReqs=m;
+  }catch(_){}
+}
+
+// ================== 列表渲染 ==================
+function switchTab(tab){
+  S.tab=tab;
+  document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab));
+  renderList();
+}
+// 搜索关键字（本地过滤，跨 tab 通用）
+function searchTerm(){ const s=document.getElementById('searchBox').value.trim().toLowerCase(); return s; }
+function matchesSearch(text,term){ return !term || (text||'').toLowerCase().includes(term); }
+// 各 tab 未读总数：好友=私聊未读；群组=群未读；申请=好友申请数+群入群申请数
+function updateTabBadges(){
+  let friendBadge=0, groupBadge=0, reqBadge=0;
+  for(const f of S.friends){ const k=keyOf('private',f.uid); friendBadge += (S.unread[k]||0); }
+  for(const g of S.groups){ const k=keyOf('group',g.group_id); groupBadge += (S.unread[k]||0); }
+  reqBadge = S.friendReqs.length;
+  for(const gid in S.groupJoinReqs) reqBadge += (S.groupJoinReqs[gid]||[]).length;
+  const set=(id,n)=>document.getElementById(id).classList.toggle('show', n>0);
+  document.getElementById('badgeFriends').textContent = friendBadge>99?'99+':friendBadge;
+  document.getElementById('badgeGroups').textContent  = groupBadge>99?'99+':groupBadge;
+  document.getElementById('badgeReqs').textContent    = reqBadge>99?'99+':reqBadge;
+  set('badgeFriends',friendBadge); set('badgeGroups',groupBadge); set('badgeReqs',reqBadge);
+}
+function renderList(){
+  updateTabBadges();
+  if(S.tab==='friends') renderFriends();
+  else if(S.tab==='groups') renderGroups();
+  else renderRequests();
+}
+function bumpConversation(kind,id){
+  const arr = kind==='private' ? S.friends : S.groups;
+  const key = kind==='private' ? 'uid' : 'group_id';
+  const idx = arr.findIndex(x=>x[key]===id);
+  if(idx>0){ const it=arr.splice(idx,1)[0]; arr.unshift(it); }
+}
+function renderFriends(){
+  const el=document.getElementById('list');
+  const term=searchTerm();
+  const list=S.friends.filter(f=>matchesSearch(f.history?('用户#'+f.uid):f.username,term));
+  let html='<div class="list-head"><button class="btn small" onclick="addFriend()">＋ 添加好友</button></div>';
+  for(const f of list){
+    const k=keyOf('private',f.uid);
+    const badge=S.unread[k]?`<span class="badge">${S.unread[k]}</span>`:'';
+    const fname = f.history ? ('用户#'+f.uid) : f.username;   // 历史会话用 uid 显示
+    const h=(f.uid*47)%360;
+        html+=`<div class="item" data-kind="p" data-id="${f.uid}" data-history="${f.history?1:0}" data-name="${esc(fname)}" onclick="openChat('private',${f.uid},${jsStr(fname)},${f.history?1:0})">
+      <div class="avatar" style="background:linear-gradient(135deg,hsl(${h},72%,56%),hsl(${(h+42)%360},72%,50%))">${f.history?'#':esc((f.username||'?')[0].toUpperCase())}
+        ${f.history?'':`<span class="dot ${f.online?'':'off'}"></span>`}
+      </div>
+      <div class="item-main">
+        <div class="item-name"><span class="uname">${esc(fname)} <span class="uid">#${f.uid}</span>${badge}</span>
+          ${f.history?'<span class="st">历史</span>':`<span class="st ${f.online?'on':'off'}">${f.online?'在线':'离线'}</span>`}
+        </div>
+        <div class="item-sub">
+          ${f.last_msg
+            ? `<span class="msg">${esc(f.last_msg)}</span><span class="msg-time">${fmtTime(f.last_time)}</span>`
+            : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+  if(!list.length) html+='<div class="empty">'+(term?'无匹配好友':'暂无好友')+'</div>';
+  el.innerHTML=html;
+  updateStat();
+}
+function renderGroups(){
+  const el=document.getElementById('list');
+  const term=searchTerm();
+  const list=S.groups.filter(g=>matchesSearch(g.history?('群#'+g.group_id):g.name,term));
+  let html='<div class="list-head"><button class="btn small" onclick="createGroup()">＋ 创建群</button><button class="btn small" onclick="joinGroup()">＋ 加入群</button></div>';
+  for(const g of list){
+    const k=keyOf('group',g.group_id);
+    const badge=S.unread[k]?`<span class="badge">${S.unread[k]}</span>`:'';
+    const gname = g.history ? ('群#'+g.group_id) : g.name;
+    const selfPerm = S.myPerm[g.group_id];
+    const roleTag = (!g.history && selfPerm===0) ? ' <span class="tag owner">群主</span>'
+                  : (!g.history && selfPerm===1) ? ' <span class="tag p1">管理员</span>' : '';
+    const cnt = (!g.history && g.member_count!=null) ? ` <span class="tag cnt">${g.member_count}人</span>` : '';
+    const h=(g.group_id*83)%360;
+      html+=`<div class="item" data-kind="g" data-id="${g.group_id}" data-history="${g.history?1:0}" data-name="${esc(gname)}" onclick="openChat('group',${g.group_id},${jsStr(gname)},${g.history?1:0})">
+      <div class="avatar g" style="background:linear-gradient(135deg,hsl(${h},70%,58%),hsl(${(h+40)%360},70%,52%))">${g.history?'#':esc((g.name||'?')[0].toUpperCase())}</div>
+      <div class="item-main">
+        <div class="item-name">
+          <span class="uname">${esc(gname)}${badge}</span>
+          <span class="gmeta">#${g.group_id}${g.history?' <span class="tag">历史</span>':''}${cnt}${roleTag}</span>
+        </div>
+        <div class="item-sub">
+          ${g.last_msg
+            ? `<span class="msg">${esc(g.last_from||'')}${g.last_from?': ':''}${esc(g.last_msg)}</span><span class="msg-time">${fmtTime(g.last_time)}</span>`
+            : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+  if(!list.length) html+='<div class="empty">'+(term?'无匹配群组':'暂无群组')+'</div>';
+  el.innerHTML=html;
+  updateStat();
+}
+async function renderRequests(){
+  const el=document.getElementById('list');
+  const term=searchTerm();
+  let html='<div class="list-title">好友申请</div>';
+  let ffound=false;
+  for(const u of S.friendReqs){
+    if(!matchesSearch(u.username,term)) continue;
+    ffound=true;
+    html+=`<div class="item">
+      <div class="avatar">${esc((u.username||'?')[0].toUpperCase())}</div>
+      <div class="item-main"><div class="item-name">${esc(u.username)} <span class="uid">#${u.uid}</span></div></div>
+      <div class="item-actions">
+        <button class="btn tiny ok" onclick="acceptReq(${u.uid})">同意</button>
+        <button class="btn tiny" onclick="rejectReq(${u.uid})">拒绝</button>
+      </div>
+    </div>`;
+  }
+  if(!ffound) html+='<div class="empty">'+(term?'无匹配好友申请':'暂无好友申请')+'</div>';
+  // 群入群申请（仅群主/管理员可见自己管理的群）——直接读缓存（登录同步 + push 增量维护），无网络请求
+  html+='<div class="list-title">群入群申请</div>';
+  let found=false;
+  for(const g of S.groups){
+    const reqs = S.groupJoinReqs[g.group_id] || [];
+    if(!reqs.length) continue;
+    const mreqs=reqs.filter(u=>matchesSearch(u.username,term));
+    if(!mreqs.length) continue;
+    found=true;
+    for(const u of mreqs){
+      html+=`<div class="item">
+        <div class="avatar g">${esc((u.username||'?')[0].toUpperCase())}</div>
+        <div class="item-main">
+          <div class="item-name">${esc(u.username)} <span class="uid">#${u.uid}</span></div>
+          <div class="item-sub">申请加入「${esc(g.name)}」</div>
+        </div>
+        <div class="item-actions">
+          <button class="btn tiny ok" onclick="handleJoinOp(${g.group_id},${u.uid},true)">同意</button>
+          <button class="btn tiny" onclick="handleJoinOp(${g.group_id},${u.uid},false)">拒绝</button>
+        </div>
+      </div>`;
+    }
+  }
+  if(!found) html+='<div class="empty">'+(term?'无匹配群入群申请':'暂无群入群申请')+'</div>';
+  el.innerHTML=html;
+}
+
+// ================== 输入草稿箱 ==================
+// 输入框内容按会话 key 存 localStorage，切会话/刷新不丢
+function draftKey(){ return S.self?('chatroom_draft_'+S.self.uid+'_'+keyOf(S.active.kind,S.active.id)):null; }
+function saveDraft(){
+  if(!S.self||!S.active) return;
+  const k=draftKey(); if(!k) return;
+  const v=document.getElementById('msgInput').value;
+  try{ if(v) localStorage.setItem(k,v); else localStorage.removeItem(k); }catch(_){}
+}
+function restoreDraft(){
+  if(!S.self||!S.active) return;
+  const k=draftKey(); if(!k) return;
+  let v='';
+  try{ v=localStorage.getItem(k)||''; }catch(_){}
+  if(msgCharCount(v)>MSG_MAX_LEN) v=truncateLen(v,MSG_MAX_LEN);   // 历史超长草稿截断，保持硬限制一致
+  const inp=document.getElementById('msgInput');
+  inp.value=v; autoResizeInput();
+  if(updateCharCount) updateCharCount();   // 恢复草稿后同步字符计数
+}
+
+// ================== 好友 / 群操作 ==================
+async function addFriend(){ const u=await uiPrompt('添加好友','输入对方 UID：','UID'); if(!u) return; const uid=parseInt(u,10); if(isNaN(uid)||uid<=0){ toast('UID 格式错误','err'); return; } const r=await api('/api/friend/request',{uid}); toast(r.status===0?'好友申请已发送':'申请失败'); }
+async function delFriend(uid){ const ok=await uiConfirm('删除好友','删除该好友？'); if(!ok) return; await api('/api/friend/delete',{uid}); S.friends=S.friends.filter(f=>f.uid!==uid); renderList(); }
+async function toggleBlock(uid){
+  if(S.blocked.has(uid)){ await api('/api/friend/unblock',{uid}); S.blocked.delete(uid); }
+  else { await api('/api/friend/block',{uid}); S.blocked.add(uid); }
+  renderList();
+}
+async function acceptReq(uid){ const r=await api('/api/friend/accept',{uid}); if(r.status===0){ S.friendReqs=S.friendReqs.filter(x=>x.uid!==uid); await loadFriends(); renderList(); } }
+async function rejectReq(uid){ await api('/api/friend/reject',{uid}); S.friendReqs=S.friendReqs.filter(x=>x.uid!==uid); renderList(); }
+async function createGroup(){ const n=await uiPrompt('创建群','群名称：','群名称'); if(!n) return; const r=await api('/api/group/create',{name:n}); toast(r.status===0?'创建成功，群号 '+r.group_id:'创建失败'); await loadGroups(); renderList(); }
+async function joinGroup(){ const g=await uiPrompt('加入群','输入群号：','群号'); if(!g) return; const gid=parseInt(g,10); if(isNaN(gid)||gid<=0){ toast('群号格式错误','err'); return; } const r=await api('/api/group/join',{gid}); toast(r.status===0?'已发送加群申请':'加群申请失败'); }
+
+// ================== 聊天 ==================
+async function openChat(kind,id,name,history){
+  // 切走前保存当前会话草稿
+  if(S.active) saveDraft();
+  S.active={kind,id,name,history:!!history};
+  S.rendered.clear();
+  S.lastDateKey='';
+  S.lastTimeKey=0;
+  S.offlineSepDone=false;
+  S.msgCache=[]; S.msgStart=0; S.msgHasMore=false;
+  sepInserted=false;
+  document.getElementById('messages').innerHTML='';
+  document.getElementById('chatTitle').textContent=name;
+  document.getElementById('groupManageBtn').style.display=(kind==='group'&&!history)?'inline-block':'none';  // 历史群不显示"群管理"
+  // 新增：历史会话隐藏输入区（只读）
+  document.getElementById('inputArea').style.display = history ? 'none' : '';
+  delete S.unread[keyOf(kind,id)];
+  stickToBottom=true;
+  renderList();
+  if(history){ document.getElementById('msgInput').value=''; }   // 只读不恢复草稿
+  else restoreDraft();
+  await loadMessages();
+  api('/api/messages/read',{peer_id:S.active.id}).catch(()=>{});
+}
+async function loadMessages(){
+  if(!S.active) return;
+  const a=S.active;
+  const path = a.kind==='private' ? '/api/messages?peer_uid='+a.id : '/api/messages/group?gid='+a.id;
+  const r=await api(path);
+  if(r.status!==0) return;
+  const all = r.messages||[];
+  const prevStart = S.msgStart;
+  S.msgCache = all;
+  // 首次进入：只渲染最近窗口；后续（新消息到达）：保留已有窗口起点，仅增量渲染新增
+  if(S.rendered.size===0){
+    S.msgStart = Math.max(0, all.length - MSG_PAGE);
+    S.msgHasMore = S.msgStart > 0;
+    renderMessages(all.slice(S.msgStart));
+  } else {
+    S.msgStart = prevStart;
+    S.msgHasMore = S.msgStart > 0;
+    renderMessages(all.slice(prevStart));   // rendered 会跳过旧的，只加新的
+  }
+}
+// 渲染一批消息到容器末尾（beforeend）。dateKey 判断沿用 S.lastDateKey/S.lastTimeKey（跨批延续）
+function renderMessages(msgs){
+  const container=document.getElementById('messages');
+  let html='';
+  for(const m of msgs){
+    if(S.rendered.has(m.message_id)) continue;
+    S.rendered.add(m.message_id);
+    const dk=dateKey(m.time);
+    if(dk!==S.lastDateKey){
+      // 按天：日期分隔（今天/昨天/M月D日）
+      S.lastDateKey=dk;
+      S.lastTimeKey=m.time;               // 跨天：重置时间间隔基准
+      html+='<div class="date-sep">'+dateTitle(m.time)+'</div>';
+    } else if(m.time - S.lastTimeKey > 30*60*1000){
+      // 同一天内，距上一条已渲染消息超过 30 分钟：插入时间条便于定位
+      html+='<div class="date-sep">'+fmtTime(m.time)+'</div>';
+    }
+    S.lastTimeKey = m.time;               // 更新基准为当前已渲染消息
+    if(!S.offlineSepDone && S.lastLogoutTime>0 && m.time > S.lastLogoutTime){
+      S.offlineSepDone=true;
+      // html+='<div class="new-msg-sep">离线消息</div>';
+    }
+    html+=renderMsg(m);
+  }
+  container.insertAdjacentHTML('beforeend', html);
+  // 贴底则滚到底；图片等异步加载撑高内容后，由下方的防抖再校正一次位置
+  scrollToBottomIfStick();
+  debounceStick();
+}
+// 向上滚动到接近顶部时，加载更早一批并 prepend 到顶部，保持滚动位置不跳动
+function loadEarlier(){
+  if(!S.msgHasMore || !S.active) return;
+  const newStart = Math.max(0, S.msgStart - MSG_PAGE);
+  const msgs = S.msgCache.slice(newStart, S.msgStart);
+  if(!msgs.length){ S.msgHasMore=false; return; }
+  const container=document.getElementById('messages');
+  const prevH = container.scrollHeight;
+  // 渲染这批（临时置空分隔状态，让这批内部独立成组；再恢复以衔接下方已渲染内容）
+  let html='';
+  let savedDate=S.lastDateKey, savedTime=S.lastTimeKey;
+  S.lastDateKey=''; S.lastTimeKey=0;
+  for(const m of msgs){
+    if(S.rendered.has(m.message_id)) continue;
+    S.rendered.add(m.message_id);
+    const dk=dateKey(m.time);
+    if(dk!==S.lastDateKey){ S.lastDateKey=dk; S.lastTimeKey=m.time; html+='<div class="date-sep">'+dateTitle(m.time)+'</div>'; }
+    else if(m.time - S.lastTimeKey > 30*60*1000){ html+='<div class="date-sep">'+fmtTime(m.time)+'</div>'; }
+    S.lastTimeKey=m.time;
+    html+=renderMsg(m);
+  }
+  S.lastDateKey=savedDate; S.lastTimeKey=savedTime;
+  S.msgStart=newStart; S.msgHasMore = S.msgStart > 0;
+  // prepend 到顶部，并补偿滚动位置，保证视觉不跳动
+  container.insertAdjacentHTML('afterbegin', html);
+  container.scrollTop += container.scrollHeight - prevH;
+}
+// 消息发送者名：私聊从好友列表找（对方即本人）；群聊从群成员缓存找；自己显示"我"
+function msgSenderName(m){
+  if(m.from_uid===S.self.uid) return '我';
+  if(m.chat_type==='private'){
+    const f=S.friends.find(x=>x.uid===m.from_uid);
+    return f?f.username:('用户#'+m.from_uid);
+  }
+  // 群聊
+  const nmap=S.groupMembers[m.target_id]||{};
+  return nmap[m.from_uid] || ('用户#'+m.from_uid);
+}
+// 消息发送者小头像（右侧聊天区，对方消息在左显示；自己消息在右显示；群聊可点击查看成员信息）
+function msgAvatar(m){
+  const h=(m.from_uid*47)%360;
+  const grp=m.chat_type==='group';
+  const hist = S.active && S.active.history;   // 历史会话（只读）：头像不可点
+  const click=(grp && !hist)?` onclick="showMemberInfo(${m.target_id},${m.from_uid})" title="查看成员信息"`:'';
+  // 自己显示用户名首字母（与左上角一致），对方显示发送者名首字母
+  const name = m.from_uid===S.self.uid ? S.self.username : msgSenderName(m);
+  return `<div class="msg-av${grp&&!hist?' clickable':''}"${click} style="background:linear-gradient(135deg,hsl(${h},72%,56%),hsl(${(h+42)%360},72%,50%))">${esc((name||'?')[0].toUpperCase())}</div>`;
+}
+// 文件类型图标：按扩展名识别类型（配色）+ 显示文字（最多4字符）
+function fileIcon(name){
+  const ext=((name||'').match(/\.([^.]+)$/)||[])[1]||'';
+  const e=ext.toUpperCase();
+  let cls='other', label=e.slice(0,4)||'FILE';
+  if(/^(PDF)$/.test(e)) cls='pdf';
+  else if(/^(ZIP|RAR|7Z|GZ|TAR)$/.test(e)) cls='zip';
+  else if(/^(DOC|DOCX|WPS)$/.test(e)) cls='doc';
+  else if(/^(XLS|XLSX|CSV|ET)$/.test(e)) cls='xls';
+  else if(/^(PPT|PPTX|DPS)$/.test(e)) cls='ppt';
+  else if(/^(TXT|MD|LOG|INI|CFG)$/.test(e)) cls='txt';
+  else if(/^(MP3|WAV|FLAC|AAC|OGG|M4A)$/.test(e)) cls='audio';
+  else if(/^(MP4|MKV|AVI|MOV|WMV|FLV|WEBM)$/.test(e)) cls='video';
+  return {label, cls, type: e||''};
+}
+function renderMsg(m){
+  const mine = m.from_uid===S.self.uid;
+  let body='';
+  // 图片文件 → 独立大图消息（不套气泡），类似 QQ/微信
+  if(m.type==='file'){
+    let meta={}; try{ meta=JSON.parse(m.content); }catch(_){}
+    if(isImage(meta.file_name)){
+      const src=`/api/file/preview?file_id=${encodeURIComponent(meta.file_id||'')}&name=${encodeURIComponent(meta.file_name||'')}`;
+      // 占位框：利用服务端解析的真实分辨率，按比例预留尺寸，加载前后布局一致（消除跳动）
+      let phStyle='';
+      const w=Number(meta.width)||0, h=Number(meta.height)||0;
+      if(w>0 && h>0){
+        const maxW=280, maxH=320;
+        const scale=Math.min(maxW/w, maxH/h, 1);   // 等比缩放到上限，不放大
+        phStyle=` style="width:${Math.round(w*scale)}px;height:${Math.round(h*scale)}px"`;
+      }
+      const img=`<img class="img-msg${phStyle?' ph':''}"${phStyle} loading="lazy" src="${src}" onclick="viewImage(this.src)" onerror="imgRetry(this)" onload="stickAfterImgLoad()">`;
+      const saveBtn=`<button class="img-save" onclick="event.stopPropagation();downloadFile('${esc(meta.file_id||'')}','${esc(meta.file_name||'')}')">保存</button>`;
+      const av=msgAvatar(m);
+      const nm = (m.chat_type==='group' && !mine && msgSenderName(m)!=='#'+m.from_uid) ? `<div class="msg-name">${esc(msgSenderName(m))}</div>` : '';
+      const avCol = av ? `<div class="av-col">${av}${nm}</div>` : '';
+      const bodyCol = av ? `<div class="content-col"><div class="img-wrap">${img}${saveBtn}</div><span class="time">${fmtTime(m.time)}</span></div>` : `<div class="img-wrap">${img}${saveBtn}</div><span class="time">${fmtTime(m.time)}</span>`;
+      return `<div class="row ${mine?'mine':'other'} img${av?' has-av':''}">${avCol}${bodyCol}</div>`;
+    }
+    const fname=esc(meta.file_name||'文件');
+    const fsize=fmtSize(meta.file_size||0);
+    const fid=esc(meta.file_id||'');
+    const ic=fileIcon(meta.file_name||'');
+    // 文件消息：独立卡片（不套普通气泡，类似图片），整卡可点击下载，自己/对方都可保存
+    const card=`<div class="file-card" data-file-id="${esc(meta.file_id||'')}" onclick="downloadFile('${fid}','${fname}')" title="下载 ${esc(meta.file_name||'')}">
+      <div class="file-icon ${ic.cls}">${esc(ic.label)}</div>
+      <div class="file-info">
+        <div class="file-name" title="${esc(meta.file_name||'')}">${fname}</div>
+        <div class="file-meta">${fsize} · ${ic.type?ic.type+' 文件':'文件'}</div>
+      </div>
+      <button class="file-dl" onclick="event.stopPropagation();downloadFile('${fid}','${fname}')">保存</button>
+    </div>`;
+    const fav=msgAvatar(m);
+    const fnm = (m.chat_type==='group' && !mine && msgSenderName(m)!=='#'+m.from_uid) ? `<div class="msg-name">${esc(msgSenderName(m))}</div>` : '';
+    const favCol = fav ? `<div class="av-col">${fav}${fnm}</div>` : '';
+    const fbodyCol = fav ? `<div class="content-col">${card}<span class="time">${fmtTime(m.time)}</span></div>` : `${card}<span class="time">${fmtTime(m.time)}</span>`;
+    return `<div class="row ${mine?'mine':'other'} file-msg${fav?' has-av':''}">${favCol}${fbodyCol}</div>`;
+  } else {
+    body=`<div class="text">${linkify(m.content)}</div>`;
+  }
+  const raw = m.type==='file' ? '' : (m.content||'');
+  const av=msgAvatar(m);
+  const nm = (m.chat_type==='group' && !mine && msgSenderName(m)!=='#'+m.from_uid) ? `<div class="msg-name">${esc(msgSenderName(m))}</div>` : '';
+  const avCol = av ? `<div class="av-col">${av}${nm}</div>` : '';
+  const bodyCol = av ? `<div class="content-col"><div class="bubble">${body}</div><span class="time">${fmtTime(m.time)}</span></div>` : `<div class="bubble">${body}</div><span class="time">${fmtTime(m.time)}</span>`;
+  // 文本消息带 data-raw（右键复制用）；文件消息无需复制
+  return `<div class="row ${mine?'mine':'other'}${av?' has-av':''}"${raw?` data-raw="${esc(raw)}"`:''}>${avCol}${bodyCol}</div>`;
+}
+// 输入框随内容自适应高度（上限 120px）；文字占满后才显示滚动条
+function autoResizeInput(){
+  const t=document.getElementById('msgInput');
+  t.style.height='auto';
+  t.style.height=Math.min(t.scrollHeight,120)+'px';
+  t.style.overflowY = t.scrollHeight > 120 ? 'auto' : 'hidden';
+}
+async function sendMessage(){
+  const input=document.getElementById('msgInput');
+  const text=input.value.trim();
+  if(!text||!S.active) return;
+  if(msgCharCount(text) > MSG_MAX_LEN){ toast('消息过长（上限 '+MSG_MAX_LEN+' 字）','err'); return; }
+  const a=S.active;
+  let r=null;
+  try{
+    r = a.kind==='private'
+      ? await api('/api/message/send',{to_uid:a.id,content:text})
+      : await api('/api/message/group',{gid:a.id,content:text});
+  }catch(_){ toast('发送失败：网络错误','err'); return; }
+  if(r.status===0){
+    input.value=''; autoResizeInput(); saveDraft(); updateCharCount();   // 清空输入后同步字数归零
+    // 自己发送成功：本地更新该会话最后消息预览（等 loadMessages 后置顶）
+    const entry = a.kind==='private' ? S.friends.find(x=>x.uid===a.id) : S.groups.find(x=>x.group_id===a.id);
+    if(entry){ entry.last_msg=text; entry.last_from='我'; entry.last_time=Date.now(); }
+    bumpConversation(a.kind,a.id); stickToBottom=true; renderList(); await loadMessages();
+  }
+  else toast('发送失败');
+}
+// Enter 发送，Shift+Enter 换行；输入时自适应高度
+const _msgInput=document.getElementById('msgInput');
+const MSG_MAX_LEN = 5000;   // 消息最大字符数（按 Unicode 码点计，换行算1个）
+function msgCharCount(s){ return [...s].length; }   // 码点数，emoji 算1个
+function updateCharCount(){
+  const t=document.getElementById('msgInput');
+  const n=msgCharCount(t.value);
+  const el=document.getElementById('charCount');
+  el.textContent=n+'/'+MSG_MAX_LEN;
+  el.classList.toggle('over', n>MSG_MAX_LEN);
+}
+_msgInput.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); }
+});
+_msgInput.addEventListener('input', ()=>{
+  if(msgCharCount(_msgInput.value)>MSG_MAX_LEN) _msgInput.value=truncateLen(_msgInput.value,MSG_MAX_LEN);
+  autoResizeInput(); saveDraft(); updateCharCount();
+});
+
+// 搜索框：输入时实时过滤当前 tab 列表
+document.getElementById('searchBox').addEventListener('input', renderList);
+
+// ================== 文件 ==================
+// 进度条已迁移到文件/图片气泡内（见 setLocalUp/setDlBar），不再有全局进度条
+// 拖拽/选择文件上传：浏览器把文件内容交给客户端，客户端转存后走现有上传链路
+function pickFile(){ document.getElementById('fileInput').click(); }
+function uploadFileBlob(file){
+  if(!S.active){ toast('请先选择会话','err'); return; }
+  if(!file || file.size<=0){ toast('文件为空','err'); return; }
+  if(S.uploading){ toast('已有文件在上传中，请稍候','err'); return; }
+  if(dlActive){ toast('下载进行中，请稍候','err'); return; }
+  const a=S.active;
+  const name=file.name||'文件';
+  document.getElementById('dropName').textContent=name;
+  // 乐观显示：自己前端立即插入本地文件气泡（不算发送，带上传进度；完成后由服务端真实消息替换）
+  const localId='local_'+Date.now();
+  const localMsg={ message_id:localId, from_uid:S.self.uid, type:'file', chat_type:a.kind, target_id:a.id, time:Date.now(),
+    content:JSON.stringify({file_name:name, file_size:file.size}) };
+  upMsg=localMsg;
+  document.getElementById('messages').insertAdjacentHTML('beforeend', renderLocalUpload(localMsg));
+  if(stickToBottom) scrollBottom();
+  debounceStick();
+  S.uploading=true;   // 标记上传进行中（互斥 + file_progress 归属判断）
+  const xhr=new XMLHttpRequest();
+  const fd=new FormData();
+  fd.append('file',file);
+  xhr.open('POST','/api/file/upload?chat_type='+encodeURIComponent(a.kind)+'&target_id='+a.id);
+  // 阶段1：浏览器→客户端（占整体 0-30%）
+  // 浏览器→本地临时目录：不显示进度（用户只关心客户端→服务端的上传进度）
+  xhr.upload.onprogress=function(){};
+  xhr.onload=function(){
+    let ret=-1;
+    try{ ret=JSON.parse(xhr.responseText).status; }catch(_){}
+    if(ret===0){
+      // 浏览器→本地完成，接下来客户端→服务端上传进度由 WS file_progress 驱动（0-100%）
+      setLocalUp(0);   // 进入上传阶段（准备中 → 上传中）
+      toast('已接收，开始上传…','ok');
+    } else {
+      S.uploading=false;
+      removeLocalUp();
+      const errMap={'-2':'参数错误','-3':'文件超过 2GB 上限','-4':'服务端拒绝','-5':'数据连接失败','-6':'传输中断'};
+      toast('上传失败：'+(errMap[ret]||'请查看客户端控制台'),'err');
+    }
+  };
+  xhr.onerror=function(){ S.uploading=false; removeLocalUp(); toast('上传失败：网络错误','err'); };
+  xhr.send(fd);
+}
+// 本地乐观上传气泡（上传中显示，仅自己可见，不算发送；完成后由服务端真实消息替换）
+function renderLocalUpload(m){
+  let meta={}; try{ meta=JSON.parse(m.content||'{}'); }catch(_){}
+  const ic=fileIcon(meta.file_name||'');
+  const fname=esc(meta.file_name||'文件');
+  const fsize=fmtSize(meta.file_size||0);
+  const av=msgAvatar(m);
+  return `<div class="row mine file-msg${av?' has-av':''}" data-local="${m.message_id}">
+    ${av?`<div class="av-col">${av}</div>`:''}
+    <div class="content-col">
+      <div class="file-card" style="cursor:default">
+        <div class="file-icon ${ic.cls}">${esc(ic.label)}</div>
+        <div class="file-info">
+          <div class="file-name">${fname}</div>
+          <div class="file-meta">${fsize} · 准备中</div>
+          <div class="file-dl-bar"><div class="file-dl-track"><div class="file-dl-fill"></div></div><span class="file-dl-pct">0%</span></div>
+        </div>
+      </div>
+      <span class="time">${fmtTime(m.time)}</span>
+    </div>
+  </div>`;
+}
+// 更新本地上传气泡进度（客户端→服务端真实进度 0-100%）
+function setLocalUp(pct){
+  if(!upMsg) return;
+  const row=document.querySelector('.row[data-local="'+upMsg.message_id+'"]');
+  if(!row) return;
+  const fill=row.querySelector('.file-dl-fill'), pctEl=row.querySelector('.file-dl-pct'), meta=row.querySelector('.file-meta');
+  const p=Math.max(0,Math.min(100,pct));
+  if(fill) fill.style.width=p+'%';
+  if(pctEl) pctEl.textContent=Math.round(p)+'%';
+  if(meta) meta.textContent='上传中';
+}
+// 移除本地上传气泡（上传完成/失败时）
+function removeLocalUp(){
+  if(!upMsg) return;
+  const row=document.querySelector('.row[data-local="'+upMsg.message_id+'"]');
+  if(row) row.remove();
+  upMsg=null;
+}
+// 文件气泡内下载进度条：显示/更新/移除（进度由 WS file_progress/file_done 驱动）
+function showDlBar(card){
+  if(!card || card.querySelector('.file-dl-bar')) return;
+  const bar=document.createElement('div');
+  bar.className='file-dl-bar';
+  bar.innerHTML='<div class="file-dl-track"><div class="file-dl-fill"></div></div><span class="file-dl-pct">0%</span>';
+  const info=card.querySelector('.file-info');
+  (info||card).appendChild(bar);
+}
+function setDlBar(card,offset,total){
+  if(!card) return;
+  showDlBar(card);
+  const fill=card.querySelector('.file-dl-fill'), pct=card.querySelector('.file-dl-pct');
+  const p=total>0?Math.min(100,Math.round(offset/total*100)):0;
+  if(fill) fill.style.width=p+'%';
+  if(pct) pct.textContent=p+'%';
+}
+function hideDlBar(card){
+  if(!card) return;
+  const b=card.querySelector('.file-dl-bar');
+  if(b) b.remove();
+}
+async function downloadFile(fileId,fileName){
+  if(dlActive){ toast('已有下载进行中，请稍候','err'); return; }
+  if(S.uploading){ toast('上传进行中，请稍候','err'); return; }
+  // 在对应文件气泡上挂下载进度条
+  const card=document.querySelector('.file-card[data-file-id="'+fileId+'"]');
+  if(card){ showDlBar(card); dlCard=card; dlActive=true; }
+  let r=null;
+  try{ r=await api('/api/file/download',{file_id:fileId,file_name:fileName}); }
+  catch(_){ r=null; }
+  // 兜底清理（正常流程由 file_done push 清理；WS 断连/网络异常时这里收尾，防止 dlActive 卡死）
+  if(dlActive){ hideDlBar(dlCard); dlActive=false; dlCard=null; }
+  if(r) toast(r.status===0?'已保存到 '+r.save_path:'下载失败', r.status===0?'ok':'err');
+  else toast('下载失败：网络错误','err');
+}
+// 灯箱：从当前已渲染图片收集列表，支持左右切换（每次打开重新收集，适配分批加载）
+let lbList=[], lbIdx=0, lbTimer=null;
+// 悬停显示/静止淡出：移动鼠标显示，静止 2s 后淡出
+function lbCtrlShow(){
+  const ctrl=document.querySelector('.lb-ctrl');
+  if(ctrl) ctrl.classList.add('show');
+  if(lbTimer) clearTimeout(lbTimer);
+  lbTimer=setTimeout(()=>{ const c=document.querySelector('.lb-ctrl'); if(c) c.classList.remove('show'); }, 2000);
+}
+function viewImage(src){
+  const imgs=[...document.querySelectorAll('#messages .img-msg')]
+    .map(i=>i.src).filter(s=>s);
+  lbList=imgs;
+  lbIdx=Math.max(0, imgs.indexOf(src));
+  document.getElementById('lightboxImg').src=src;
+  document.getElementById('lightbox').style.display='flex';
+  lbUpdate();
+  lbCtrlShow();
+  // 灯箱内鼠标移动 → 显示控件；静止 → 淡出
+  document.getElementById('lightbox').onmousemove=lbCtrlShow;
+}
+function lbUpdate(){
+  const img=document.getElementById('lightboxImg');
+  document.querySelector('.lb-prev').style.display = lbList.length>1 ? 'flex':'none';
+  document.querySelector('.lb-next').style.display = lbList.length>1 ? 'flex':'none';
+  if(lbIdx>=0 && lbIdx<lbList.length) img.src=lbList[lbIdx];
+}
+function lbSwitch(dir){ lbIdx=(lbIdx+dir+lbList.length)%lbList.length; lbUpdate(); }
+function lbDownload(){
+  // 从当前图片 URL 解析 file_id/name 调下载
+  const m=lbList[lbIdx]||'';
+  const fid=decodeURIComponent((m.match(/file_id=([^&]+)/)||[])[1]||'');
+  const nm=decodeURIComponent((m.match(/name=([^&]+)/)||[])[1]||'');
+  if(fid) downloadFile(fid,nm||'preview.png');
+}
+function closeLightbox(){
+  document.getElementById('lightbox').style.display='none';
+  document.getElementById('lightbox').onmousemove=null;
+  if(lbTimer) clearTimeout(lbTimer);
+}
+// 键盘快捷键：Esc 关灯箱/弹窗，Ctrl+Enter 发送
+document.addEventListener('keydown', function(e){
+  if(e.key==='Escape'){
+    if(document.getElementById('lightbox').style.display==='flex'){ closeLightbox(); return; }
+    const dlg=document.getElementById('uiDialog');
+    if(dlg.classList.contains('show')) document.getElementById('uiDlgCancel').click();
+  }
+  if((e.ctrlKey||e.metaKey) && e.key==='Enter'){
+    const t=document.getElementById('msgInput');
+    if(t && document.activeElement===t && t.value.trim()) sendMessage();
+  }
+});
+// 预览图加载失败自动重试（最多2次），仍失败则隐藏缩略图（点击大图仍可正常放大）
+function imgRetry(el){
+  let n = parseInt(el.dataset.retry||'0',10);
+  if(n>=2){ el.style.display='none'; return; }
+  el.dataset.retry=String(n+1);
+  setTimeout(()=>{ el.src=el.src; }, 600);
+}
+
+// ================== 群管理 ==================
+async function openGroupPanel(){
+  if(!S.active||S.active.kind!=='group') return;
+  S.groupPanel=S.active.id;
+  document.getElementById('groupModal').style.display='flex';
+  await loadGroupPanel(S.active.id);
+}
+function closeGroupPanel(){ document.getElementById('groupModal').style.display='none'; S.groupPanel=null; }
+// ================== 用户设置 ==================
+function openSettings(){
+  const u=S.self; if(!u) return;
+  document.getElementById('setAvatar').textContent=(u.username||'?')[0].toUpperCase();
+  document.getElementById('setName').textContent=u.username;
+  document.getElementById('setUid').textContent='UID: '+u.uid;
+  document.getElementById('settingsModal').style.display='flex';
+}
+function closeSettings(){ document.getElementById('settingsModal').style.display='none'; }
+async function loadGroupPanel(gid){
+  try{
+    if(!S.myPerm) S.myPerm={};
+    let members=[], fetchErr=false;
+    try {
+      const r=await api('/api/group/members?gid='+gid);
+      members = (r.status===0)?(r.members||[]):[];
+      fetchErr = r.status!==0;
+    } catch(_) { fetchErr=true; }
+    let selfPerm=2;
+    for(const m of members){ if(m.uid===S.self.uid){ selfPerm=m.permission; S.myPerm[gid]=m.permission; } }
+    const permName=['群主','管理员','成员'];
+    let html='<div class="gp-sec">成员列表（'+members.length+'）</div>';
+    if(fetchErr) html+='<div class="empty">成员加载失败</div>';
+    for(const m of members){
+      const mine=m.uid===S.self.uid;
+      const nm=m.usr_name||'';
+      let acts='';
+      if(!mine){
+        if(selfPerm===0&&m.permission===2) acts+=`<button class="btn tiny" onclick="setAdminOp(${gid},${m.uid},true)">设管理员</button>`;
+        if(selfPerm===0&&m.permission===1) acts+=`<button class="btn tiny" onclick="setAdminOp(${gid},${m.uid},false)">取消管理</button>`;
+        if(selfPerm<=1&&m.permission===2) acts+=`<button class="btn tiny warn" onclick="kickOp(${gid},${m.uid})">移出</button>`;
+      }
+      html+=`<div class="gp-member">
+        <div class="avatar ${m.permission===0?'g':''}">${esc((nm||'?')[0].toUpperCase())}</div>
+        <div class="gp-name">${esc(nm)} ${mine?'(我)':''} <span class="tag p${m.permission}">${permName[m.permission]||'?'}</span></div>
+        <div class="gp-actions">${acts}</div>
+      </div>`;
+    }
+    html+='<div class="gp-sec">入群申请</div>';
+    let reqs=[];
+    try {
+      const rr=await api('/api/group/join_requests?gid='+gid);
+      reqs=rr.status===0?(rr.requests||[]):[];
+    } catch(_) {}
+    if(!reqs.length) html+='<div class="empty">暂无申请</div>';
+    for(const u of reqs){
+      html+=`<div class="gp-member">
+        <div class="gp-name">${esc(u.username)} <span class="uid">#${u.uid}</span></div>
+        <div class="gp-actions">
+          <button class="btn tiny ok" onclick="handleJoinOp(${gid},${u.uid},true)">同意</button>
+          <button class="btn tiny" onclick="handleJoinOp(${gid},${u.uid},false)">拒绝</button>
+        </div>
+      </div>`;
+    }
+    html+=`<div class="gp-foot">
+      <button class="btn small" onclick="remindOp(${gid})">免打扰</button>
+      <button class="btn small" onclick="leaveOp(${gid})">退出群</button>
+      ${selfPerm===0?`<button class="btn small warn" onclick="disbandOp(${gid})">解散群</button>`:''}
+    </div>`;
+    document.getElementById('gpBody').innerHTML=html;
+  } catch(e){
+    console.error('loadGroupPanel error:',e);
+    document.getElementById('gpBody').innerHTML='<div class="empty">群管理面板加载失败，请查看控制台</div>';
+  }
+}
+async function setAdminOp(gid,uid,isAdmin){ await api('/api/group/set_admin',{gid,target_uid:uid,is_admin:isAdmin}); loadGroupPanel(gid); }
+async function kickOp(gid,uid){ const ok=await uiConfirm('移出成员','移出该成员？'); if(!ok) return; await api('/api/group/kick',{gid,target_uid:uid}); loadGroupPanel(gid); }
+async function handleJoinOp(gid,uid,approval){
+  const r=await api('/api/group/handle_join',{gid,target_uid:uid,approval});
+  if(r.status===0){
+    // 本地从申请缓存移除（其它管理员通过 member_update push 重新同步）
+    if(S.groupJoinReqs[gid]){
+      S.groupJoinReqs[gid]=S.groupJoinReqs[gid].filter(u=>u.uid!==uid);
+      if(!S.groupJoinReqs[gid].length) delete S.groupJoinReqs[gid];
+    }
+    if(S.tab==='requests') renderRequests();
+  }
+  loadGroupPanel(gid);
+}
+async function leaveOp(gid){
+  const ok=await uiConfirm('退出群','退出该群？'); if(!ok) return;
+  const r=await api('/api/group/leave',{gid});
+  if(r.status===0){ closeChatIf(gid); await loadGroups(); renderList(); }
+}
+async function disbandOp(gid){
+  const ok=await uiConfirm('解散群','解散该群？'); if(!ok) return;
+  const r=await api('/api/group/disband',{gid});
+  if(r.status===0){ closeChatIf(gid); await loadGroups(); renderList(); }
+}
+function closeChatIf(gid){
+  if(S.active&&S.active.kind==='group'&&S.active.id===gid){
+    S.active=null; document.getElementById('messages').innerHTML='';
+    document.getElementById('chatTitle').textContent='请选择会话';
+    document.getElementById('groupManageBtn').style.display='none';
+  }
+}
+async function remindOp(gid){
+  const c=await uiPrompt('免打扰','免打扰设置：0=正常通知 1=接收但不通知 2=不接收','0/1/2');
+  if(c==null) return;
+  const v=parseInt(c,10);
+  if(isNaN(v)||v<0||v>2){ toast('请输入 0/1/2','err'); return; }
+  const r=await api('/api/group/remind',{gid,remind:v});
+  toast(r.status===0?'已设置':'设置失败');
+}
+
+// ================== WebSocket 推送 ==================
+async function handlePush(p){
+  const t=p.type;
+  if(t==='chat'){
+    const m=p.data;
+    if(m.chat_type==='private'){
+      const peer=(m.from_uid===S.self.uid)?m.target_id:m.from_uid;
+      const k=keyOf('private',peer);
+      if(S.active&&S.active.kind==='private'&&S.active.id===peer){
+        if(!S.rendered.has(m.message_id)){
+          S.rendered.add(m.message_id);
+          if(m.from_uid===S.self.uid && m.type==='file') removeLocalUp();   // 服务端真实消息到达：移除本地乐观气泡
+          const box=document.getElementById('messages');
+          // 私聊：不插新消息分隔线，直接追加
+          box.insertAdjacentHTML('beforeend',renderMsg(m));
+          scrollToBottomIfStick(); debounceStick();
+        }
+        api('/api/messages/read',{peer_id:peer}).catch(()=>{});
+      } else { S.unread[k]=(S.unread[k]||0)+1; toast('新私聊消息'); notifyUser('新私聊消息', (p.data.username||'')+'：'+(m.type==='file'?'[文件]':m.content||'')); }
+      // 本地更新该会话的最后消息预览 + 置顶
+      const f=S.friends.find(x=>x.uid===peer);
+      if(f){ f.last_msg = m.type==='file' ? (isImage(((m.content||'').match(/"file_name":"([^"]*)"/)||[])[1]||'') ? '[图片]' : '[文件]') : (m.content||''); f.last_from = (m.from_uid===S.self.uid)?'我':(p.data.username||''); f.last_time=m.time; }
+      bumpConversation('private',peer);    // 置顶该好友
+      renderList();                        // 刷新排序
+    } else {
+      const k=keyOf('group',m.target_id);
+      if(S.active&&S.active.kind==='group'&&S.active.id===m.target_id){
+        if(!S.rendered.has(m.message_id)){
+          S.rendered.add(m.message_id);
+          if(m.from_uid===S.self.uid && m.type==='file') removeLocalUp();   // 服务端真实消息到达：移除本地乐观气泡
+          const box=document.getElementById('messages');
+          if(!stickToBottom && !nearBottom(box)){
+            if(!sepInserted){ box.insertAdjacentHTML('beforeend','<div class="new-msg-sep">新消息</div>'); sepInserted=true; }
+          }
+          box.insertAdjacentHTML('beforeend',renderMsg(m));
+          scrollToBottomIfStick(); debounceStick();
+        }
+        api('/api/messages/read',{peer_id:m.target_id}).catch(()=>{});
+      } else { S.unread[k]=(S.unread[k]||0)+1; toast('新群消息'); notifyUser('群消息', '群「'+(p.data.group_name||'')+'」：'+(m.type==='file'?'[文件]':m.content||'')); }
+      const g=S.groups.find(x=>x.group_id===m.target_id);
+      if(g){
+        g.last_msg = m.type==='file' ? (isImage(((m.content||'').match(/"file_name":"([^"]*)"/)||[])[1]||'') ? '[图片]' : '[文件]') : (m.content||'');
+        // 发送者名：从群成员缓存查（方案A）；查不到用 uid 兜底
+        const nmap=S.groupMembers[m.target_id]||{};
+        g.last_from = (m.from_uid===S.self.uid) ? '我' : (nmap[m.from_uid] || ('#'+m.from_uid));
+        g.last_from_uid = m.from_uid;
+        g.last_time=m.time;
+      }
+      bumpConversation('group',m.target_id);   // 置顶该群
+      renderList();                            // 刷新排序
+    }
+  } else if(t==='friend'){
+    if(p.action==='request'){
+      toast('收到好友申请：' + (p.data.username||''),'ok');
+      notifyUser('好友申请', (p.data.username||'')+' 申请添加你为好友');
+    } else if(p.action==='agree'){
+      toast((p.data.username||'')+' 已同意你的好友申请','ok');
+    }
+    try{ await Promise.all([loadFriends(), loadFriendReqs(), loadBlocks()]); }catch(_){}
+    renderList();
+    updateStat();
+  } else if(t==='group'){
+    if(p.action==='join_request'){
+      const gid=p.data.group_id;
+      // 增量：新申请加入本地缓存
+      (S.groupJoinReqs[gid]=S.groupJoinReqs[gid]||[]).push({uid:p.data.apply_uid, username:p.data.apply_name||''});
+      toast('收到入群申请：' + (p.data.apply_name||'') + ' 申请加入「' + (p.data.group_name||'') + '」');
+      notifyUser('入群申请', (p.data.apply_name||'')+' 申请加入「'+(p.data.group_name||'')+'」');
+      if(S.tab==='requests') renderRequests();
+    } else if(p.action==='kicked'){
+      toast('你已被移出群「' + (p.data.group_name||'') + '」','err');
+      closeChatIf(p.data.group_id);
+    } else if(p.action==='join_result'){
+      toast(p.data.approval ? '已加入群「'+(p.data.group_name||'')+'」' : '加群申请被拒绝', p.data.approval?'ok':'err');
+    } else if(p.action==='permission_changed'){
+      // 被任命为管理员/群主：立即同步该群历史未决申请（新管理员可处理历史申请）
+      if(p.data.new_permission<=1) loadJoinReqs();
+    } else if(p.action==='member_update'){
+      if(p.data.update_type==='disbanded'){
+        toast('群「'+(p.data.group_name||'')+'」已解散','err');
+        closeChatIf(p.data.group_id);
+      } else if(p.data.update_type==='join'){
+        // 新成员加入 → 对应申请已被处理，重新同步申请列表（覆盖所有管理员）
+        loadJoinReqs();
+      }
+    }
+    await loadGroups();
+    renderList();
+    updateStat();
+    if(S.groupPanel) loadGroupPanel(S.groupPanel);
+  } else if(t==='file_progress'){
+    if(S.uploading && upMsg){
+      // 上传中：同步本地气泡进度（客户端→服务端真实进度 0-100%）
+      const frac=p.total>0?Math.min(100,p.offset/p.total*100):100;
+      setLocalUp(frac);
+    } else if(dlActive && dlCard){
+      setDlBar(dlCard,p.offset,p.total);   // 下载中：同步文件气泡内进度条
+    }
+  } else if(t==='file_done'){
+    if(dlActive){ hideDlBar(dlCard); dlActive=false; dlCard=null; }
+    if(S.uploading && upMsg){
+      if(p.status===0) setLocalUp(100);    // 上传成功：等真实消息 push 替换（以服务端时间为准）
+      else removeLocalUp();                // 上传失败：移除本地气泡
+    }
+    S.uploading=false;
+    // 下载（带 save_path）：HTTP 响应已弹过"已保存到…"，这里只收尾，避免双 toast
+    // 文件消息本身会经 notifyFileMessage → chat push 增量渲染，无需在此 loadMessages（会重置分页窗口）
+    if(p.save_path){ if(S.active) scrollToBottomIfStick(); return; }
+    toast(p.status===0?'文件完成':'文件传输失败');
+  }
+}
+
+// ================== 事件绑定 ==================
+// 聊天滚动：用户主动向上滚动（离开底部）则取消贴底；回到底部则恢复贴底
+// 接近顶部且还有更早消息时，加载上一批并保持滚动位置
+let earlierTimer=null;
+document.getElementById('messages').addEventListener('scroll', function(){
+  stickToBottom = nearBottom(this);
+  if(this.scrollTop < 60 && S.msgHasMore){
+    if(earlierTimer) clearTimeout(earlierTimer);
+    earlierTimer=setTimeout(()=>{ loadEarlier(); earlierTimer=null; }, 150);
+  }
+});
+// 文件选择 + 拖拽上传
+(function(){
+  const mp=document.getElementById('mainPanel');
+  let depth=0;
+  mp.addEventListener('dragenter',e=>{ e.preventDefault(); depth++; document.getElementById('dropMask').classList.add('show'); });
+  mp.addEventListener('dragover',e=>{ e.preventDefault(); });
+  mp.addEventListener('dragleave',e=>{ e.preventDefault(); if(--depth<=0){ depth=0; document.getElementById('dropMask').classList.remove('show'); } });
+  mp.addEventListener('drop',e=>{
+    e.preventDefault(); depth=0; document.getElementById('dropMask').classList.remove('show');
+    const f=(e.dataTransfer&&e.dataTransfer.files)?e.dataTransfer.files[0]:null;
+    if(f) uploadFileBlob(f);
+  });
+})();
+document.getElementById('fileInput').addEventListener('change', function(){
+  if(this.files && this.files[0]) uploadFileBlob(this.files[0]);
+  this.value=''; // 允许重复选择同一文件
+});
+// Ctrl+V 粘贴图片直接上传（截图后直接发图）
+document.addEventListener('paste', function(e){
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  for(const it of items){
+    if(it.type && it.type.startsWith('image/')){
+      const f=it.getAsFile();
+      if(f){ e.preventDefault(); uploadFileBlob(f); }
+      break;
+    }
+  }
+});
+document.getElementById('loginBtn').addEventListener('click', doLogin);
+document.getElementById('regBtn').addEventListener('click', doRegister);
+document.getElementById('settingsBtn').addEventListener('click', openSettings);
+document.getElementById('settingsLogoutBtn').addEventListener('click', ()=>{ closeSettings(); doLogout(); });
+document.getElementById('settingsDelBtn').addEventListener('click', ()=>{ closeSettings(); delAccount(); });
+document.getElementById('themeBtn').addEventListener('click', toggleTheme);
+document.getElementById('userInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+document.getElementById('passInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+document.getElementById('userInput').addEventListener('input', checkLenLimits);
+document.getElementById('passInput').addEventListener('input', checkLenLimits);
+// 硬性上限：达到上限后字符不增加（用户名/密码/弹窗/搜索；消息框上限在 msgInput 监听里处理）
+hardLimit(document.getElementById('userInput'), USER_MAX);
+hardLimit(document.getElementById('passInput'), PASS_MAX);
+hardLimit(document.getElementById('uiDlgInput'), 50);   // 弹窗输入：群名/群公告/UID/密码等
+hardLimit(document.getElementById('searchBox'), 100);   // 搜索框宽松上限
+// 点击空白处关闭右键菜单 / 表情面板（点击表情按钮本身或面板内部不关闭）
+document.addEventListener('click', (e)=>{
+  if(e.target.closest('#emojiBtn') || e.target.closest('#emojiPanel')) return;
+  hideCtx();
+  if(emojiOpen){ emojiOpen=false; document.getElementById('emojiPanel').style.display='none'; }
+});
+// 右键菜单（消息复制 / 会话操作）
+document.addEventListener('contextmenu', function(e){
+  const row=e.target.closest('.row[data-raw]');
+  const item=e.target.closest('.item[data-kind]');
+  if(row){
+    e.preventDefault();
+    if(!row.dataset.raw) return;
+    showCtx(e.clientX,e.clientY,[
+      {label:'复制文本', fn:()=>{ copyText(row.dataset.raw); toast('已复制','ok'); }},
+    ]);
+  } else if(item){
+    e.preventDefault();
+    const id=Number(item.dataset.id), name=item.dataset.name;
+    const kind=item.dataset.kind==='p'?'private':'group';
+    const hist=item.dataset.history==='1';
+    const items=[
+      {label:'打开聊天', fn:()=>openChat(kind,id,name,hist)},
+    ];
+    if(kind==='private'){
+      if(!hist){
+        items.push({label:'删除好友', cls:'danger', fn:()=>delFriend(id)});
+        items.push(S.blocked.has(id)?{label:'解除屏蔽', fn:()=>toggleBlock(id)}:{label:'屏蔽此人', cls:'danger', fn:()=>toggleBlock(id)});
+      }
+    } else {
+      if(!hist) items.push({label:'群管理', fn:()=>{ openChat(kind,id,name); setTimeout(openGroupPanel,80); }});
+    }
+    showCtx(e.clientX,e.clientY,items);
+  }
+});
+
+// ================== 初始化 ==================
+(function init(){
+  // 主题记忆
+  let theme='dark';
+  try{ theme=localStorage.getItem('chatroom_theme')||'dark'; }catch(_){}
+  applyTheme(theme);
+  initEmoji();
+  initParticles();
+  // 恢复会话（刷新页面不退回登录界面）
+  (async function(){
+    try {
+      const r = await api('/api/session');
+      if(r.status===0){
+        S.self={uid:r.uid, username:r.username};
+        S.lastLogoutTime = r.last_logout_time||0;
+        showLoading();
+        enterApp();
+        return;
+      }
+    } catch(_) {}
+    // 未登录：保持默认登录页（loginPage 默认 flex）
+  })();
+})();
+</script>
+</body>
+</html>
