@@ -2,6 +2,7 @@
 #include "socket.h"
 #include "shared.h"
 #include "reactor.h"
+#include "database.h"
 #include <fstream>
 #include <termios.h>
 #include <pthread.h>
@@ -16,13 +17,8 @@
 
 class UidGenerator {
 public:
-  void init(int start) {
-    counter_.store(start);
-  }
-
-  int get() {
-    return counter_.fetch_add(1);
-  }
+  void init(int start) { counter_.store(start); }
+  int get() { return counter_.fetch_add(1); }
 
 private:
   std::atomic<int> counter_{10000};
@@ -30,89 +26,107 @@ private:
 
 class UsrManager {
 public:
-  bool verify(int uid,const std::string& password); // 验证密码
+
   bool regis(const std::string& username,const std::string& password,int uid);
   bool login(const std::string& username,const std::string& password,int& out_uid);
   bool delUsr(int uid,const std::string& password);
-
-  bool load(const std::string& path);
-  bool save(const std::string& path);
-
+  void setDb(Database* db) { db_ = db; }
   int getMaxUid();
   bool isExist(const std::string& username);
   std::optional<User> getUser(int uid);
-    
+
+  bool load();
+  uint64_t getLastLogout(int uid);
+  void updateLastLogout(int uid,uint64_t t);
+
 private:
-  std::unordered_map<int,Account> uid_map;
-  std::unordered_map<std::string,int> name_map;
+  bool insertUser(const Account& a);
+  bool deleteUser(int uid);
+  std::vector<Account> selectAllUsers();
+
+  bool verify(int uid,const std::string& password); // 验证密码
+
+private:
+  std::unordered_map<int,Account> uid_map_;
+  std::unordered_map<std::string,int> name_map_;
   std::mutex mtx_;
+  Database* db_ = nullptr;
 };
 
 class FriendManager {
 public:
+  void setDb(Database* db) { db_ = db; }
+
   std::vector<int> list_friend(int uid);
   std::vector<int> list_request(int uid);
   int del(int uid1,int uid2);
   int request(int from_uid,int to_uid);
   int agree(int uid1,int uid2);
   int reject(int uid1,int uid2);
-
   bool isFriend(int uid1,int uid2);
-
   bool removeUsr(int uid); // 注销
-
-  bool load(const std::string& path);
-  bool save(const std::string& path);
-
   // 屏蔽/拉黑相关
   int block(int uid,int target);
   int unblock(int uid,int target);
   bool isBlocked(int uid,int target);
   std::vector<int> getBlockList(int uid);
+  bool load();
 
 private:
+  bool insertFriend(int a,int b);
+  bool deleteFriendPair(int a,int b);
+  bool insertFriendRequest(int from,int to);
+  bool deleteFriendRequest(int a,int b);
+  bool insertBlock(int uid,int target);
+  bool deleteBlock(int uid,int target);
+  bool deleteUserAll(int uid);
+  void loadFriends();
+  void loadRequests();
+  void loadBlocks();
+
   bool isFriend_(int uid1,int uid2);
 
 private:
   std::unordered_map<int,std::unordered_set<int>> friends_;
   std::unordered_map<int,std::unordered_set<int>> requests_;
   std::unordered_map<int,std::unordered_set<int>> block_;
+  Database* db_ = nullptr;
   std::mutex mtx_;
 };
 
 class MessageManager {
 public:
+  void setDb(Database* db) { db_ = db; }
   int add(const Message& msg);
 
   std::vector<Message> getMessagesByTime(int uid,uint64_t time); //获取某个时间后的所有消息，可用于离线消息的同步
   std::vector<Message> getAllMsg(int uid); //获取所有消息
-  std::vector<Message> getHistory(int uid1,int uid2);
-  // std::vector<Message> getGroupMessages(int gid,uint64_t after_time);
   std::string getMsgId();
-
+  bool removeGroupMessages(int gid);
   bool removeUsr(int uid);
 
-  bool save(const std::string& path);
-  bool load(const std::string& path);
+private:
+  std::vector<Message> queryMessages(int uid,uint64_t time);
+  Message rowToMessage(MYSQL_ROW row);
 
 private:
-  std::unordered_map<std::string,std::vector<Message>> history_;
   std::atomic<uint64_t> count{0};
   std::mutex mtx_;
+  Database* db_ = nullptr;
 };
 
 class GroupManager {
 public:
+  void setDb(Database* db) { db_ = db; }
+
   int createGroup(const User& owner,std::string& name,int& out_gid);
   int disbandGroup(int group_id,int uid);
-  int renameGroup(int group_id,int handler_id,std::string& new_name);
-  int transferOwner(); // 转移群主
   // 成员管理
   int joinRequest(int group_id,int apply_uid);
   int handleRequest(int group_id,int handler_uid,const User& target_usr,bool approval);
   int leaveGroup(int group_id,int uid);
   int kickMember(int group_id,int handler_uid,int target_id);
-  int removeUser(int uid); // 注销相关，退出所有群，群主则解散其群
+  int removeUser(int uid,std::vector<int>* disbanded); // 注销相关，退出所有群，群主则解散其群
   // 管理员设置
   int setAdmin(int group_id,int handler_uid,int target_id,bool admin);
   // 消息免打扰设置
@@ -126,14 +140,22 @@ public:
   int getPermission(int group_id,int uid); // 查询某用户在群中的权限
   uint64_t getJoinTime(int group_id,int uid);
   int ifRemind(int group_id,int uid);
-
-  bool load(const std::string& path);
-  bool save(const std::string& path);
+  bool load();
 
 private:
-  int makeGroupId() {
-    return next_group_id_++;
-  }
+  bool insertGroup(const GroupInfo& g);
+  bool deleteGroup(int gid);
+  bool insertGroupMember(int gid,const GroupMember& m);
+  bool deleteGroupMember(int gid,int uid);
+  bool updateMemberPermission(int gid,int uid,int perm);
+  bool updateMemberRemind(int gid,int uid,int remind);
+  bool insertJoinRequest(int gid,int uid);
+  bool deleteJoinRequest(int gid,int uid);
+  void loadGroups();
+  void loadMembers();
+  void loadJoinRequests();
+
+  int makeGroupId() { return next_group_id_++; }
 
 private:
   std::unordered_map<int,GroupInfo> groups_; // group_id -> info
@@ -141,11 +163,14 @@ private:
   std::unordered_map<int,std::unordered_set<int>> join_requests_; // group_id -> set<apply_uid>
   std::atomic<int> next_group_id_{100000};
   std::mutex mtx_;
+  Database* db_ = nullptr;
 };
 
 class FileManager {
 public:
   FileManager(const std::string& meta_path = "./data/filemeta.json",const std::string& storage_dir = "./data/files/");
+
+  void setDb(Database* db) { db_ = db; }
 
   bool init();
   bool addFileMeta(const FileMeta& meta); // 新增文件元数据
@@ -166,16 +191,21 @@ public:
   bool removePart(const std::string& file_id); // 失败/放弃时清理
 
 private:
+  bool insertFileMeta(const FileMeta& m);
+  bool updateFileMetaDb(const FileMeta& m);
+  bool updateFileReceived(const std::string& file_id,uint64_t received);
+  bool updateFileStatus(const std::string& file_id,int status);
+  bool deleteFileMetaDb(const std::string& file_id);
   bool loadMeta();
-  bool saveMeta();
+
   void cleanupOrphans(); // 启动时清理
 
 private:
-  std::string meta_path_;
   std::string storage_dir_; // 文件存储目录（以 / 结尾）
   std::unordered_map<std::string,FileMeta> metas_; // file_id -> FileMeta
   mutable std::mutex mtx_;
   std::atomic<uint64_t> id_counter_{0};
+  Database* db_ = nullptr;
 };
 
 class SessionManager {

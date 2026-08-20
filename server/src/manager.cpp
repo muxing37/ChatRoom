@@ -16,124 +16,64 @@ const std::string GROUPDATA = SAVEPATH + "/groupdata.json";
 // 未完成上传的过期时间，超过该时长仍未完成的 .uploading 视为放弃，服务端重启时删除
 constexpr uint64_t UPLOAD_STALE_MS = 24ULL * 3600 * 1000; // 24 小时
 
-std::string privateId(int uid1, int uid2) {
-  if(uid1 > uid2) std::swap(uid1, uid2);
-  return "private_" + std::to_string(uid1) + "_" + std::to_string(uid2);
-}
-std::string groupId(int groupId) {
-  return "group_" + std::to_string(groupId);
-}
 // 用户管理相关
 bool UsrManager::verify(int uid,const std::string& password) {
-  auto uiter = uid_map.find(uid);
-  if(uiter == uid_map.end()) {
-    return false;
+  Account auth;
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    auto it = uid_map_.find(uid);
+    if(it == uid_map_.end()) return false;
+    auth = it->second;
   }
-  if(uiter->second.password_hash != passwordHash(password,uiter->second.salt)) {
-    return false;
-  }
-  return true;
+  return auth.password_hash == passwordHash(password,auth.salt);
 }
 
 bool UsrManager::regis(const std::string& username,const std::string& password,int uid) {
-  std::lock_guard<std::mutex> lock(mtx_);
-
-  if(name_map.count(username)) {
-    return false;
-  }
-
   Account auth;
   auth.uid = uid;
   auth.username = username;
   auth.salt = getSalt();
   auth.password_hash = passwordHash(password,auth.salt);
-
-  uid_map[uid] = auth;
-  name_map[username] = uid;
-
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    if(name_map_.count(username)) return false;
+    if(!insertUser(auth)) return false;
+    uid_map_[uid] = auth;
+    name_map_[username] = uid;
+  }
   return true;
 }
 
 bool UsrManager::login(const std::string& username,const std::string& password,int& out_uid) {
-  std::lock_guard<std::mutex> lock(mtx_);
-
-  auto iter = name_map.find(username);
-  if(iter == name_map.end()) {
-    return false;
+  Account auth;
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    auto iter = name_map_.find(username);
+    if(iter == name_map_.end()) return false;
+    auto uiter = uid_map_.find(iter->second);
+    if(uiter == uid_map_.end()) return false;
+    auth = uiter->second;
   }
-
-  int uid = iter->second;
-  if(!verify(uid,password)) {
-    return false;
-  }
-  out_uid = uid;
+  if(auth.password_hash != passwordHash(password, auth.salt)) return false;
+  out_uid = auth.uid;
   return true;
 }
 
 bool UsrManager::delUsr(int uid,const std::string& password) {
+  if(!verify(uid,password)) return false;
   std::lock_guard<std::mutex> lock(mtx_);
-  if(!verify(uid,password)) {
-    return false;
-  }
-  auto it = uid_map.find(uid);
-  if(it == uid_map.end()) return false;
-  name_map.erase(it->second.username);
-  uid_map.erase(it);
-  return true;
-}
-
-bool UsrManager::load(const std::string& path) {
-  std::ifstream ifs(path);
-
-  if(!ifs.is_open()) return false;
-
-  nlohmann::json j;
-  ifs >> j;
-
-  uid_map.clear();
-  name_map.clear();
-
-  for(auto& item : j) {
-    Account auth;
-
-    auth.uid = item["uid"];
-    auth.username = item["username"];
-    // auth.password = item["password"];
-    auth.password_hash = item["password_hash"];
-    auth.salt = item["salt"];
-
-    uid_map[auth.uid] = auth;
-    name_map[auth.username] = auth.uid;
-  }
-
-  return true;
-}
-
-bool UsrManager::save(const std::string& path) {
-  nlohmann::json j = nlohmann::json::array();
-
-  for(auto& [uid, auth] : uid_map) {
-    j.push_back({
-      {"uid",auth.uid},
-      {"username",auth.username},
-      {"salt",auth.salt},
-      {"password_hash",auth.password_hash}
-    });
-  }
-
-  std::ofstream ofs(path);
-
-  if(!ofs.is_open()) return false;
-
-  ofs << j.dump(4);
-
+  auto it = uid_map_.find(uid);
+  if(it == uid_map_.end()) return false;
+  if(!deleteUser(uid)) return false;
+  name_map_.erase(it->second.username);
+  uid_map_.erase(it);
   return true;
 }
 
 int UsrManager::getMaxUid() {
   int max_uid = 10000;
 
-  for(auto& [uid, auth] : uid_map) {
+  for(auto& [uid, auth] : uid_map_) {
     if(uid > max_uid) max_uid = uid;
   }
 
@@ -142,7 +82,7 @@ int UsrManager::getMaxUid() {
 
 bool UsrManager::isExist(const std::string& username) {
   std::lock_guard<std::mutex> lock(mtx_);
-  if(name_map.count(username)) {
+  if(name_map_.count(username)) {
     return true;
   }
   return false;
@@ -151,8 +91,8 @@ bool UsrManager::isExist(const std::string& username) {
 std::optional<User> UsrManager::getUser(int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
 
-  auto iter = uid_map.find(uid);
-  if(iter == uid_map.end()) {
+  auto iter = uid_map_.find(uid);
+  if(iter == uid_map_.end()) {
     return std::nullopt;
   }
   User usr;
@@ -160,6 +100,70 @@ std::optional<User> UsrManager::getUser(int uid) {
   usr.username = iter->second.username;
   usr.online = false;
   return usr;
+}
+
+uint64_t UsrManager::getLastLogout(int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = uid_map_.find(uid);
+  if(it != uid_map_.end()) {
+    return it->second.last_logout_time;
+  }
+  return 0;
+}
+
+bool UsrManager::load() {
+  auto all = selectAllUsers();
+  if(db_ && all.empty() && !db_->isConnected()) return false;
+  std::lock_guard<std::mutex> lock(mtx_);
+  uid_map_.clear();
+  name_map_.clear();
+  for(auto& a : all) {
+    uid_map_[a.uid] = a;
+    name_map_[a.username] = a.uid;
+  }
+  return true;
+}
+
+bool UsrManager::insertUser(const Account& a) {
+  if(!db_) return false;
+  std::string sql = 
+    "INSERT INTO users (uid,username,password_hash,salt,last_logout_time) VALUES (" +
+    std::to_string(a.uid) + ",'" + db_->escape(a.username) + "','" +
+    a.password_hash + "','" + a.salt + "',0)";
+  if(!db_->execute(sql)) {
+    LOG(ERROR) << "insertUser failed";
+    return false;
+  }
+  return true;
+}
+
+bool UsrManager::deleteUser(int uid) {
+  if(!db_) return false;
+  return db_->execute("DELETE FROM users WHERE uid=" + std::to_string(uid));
+}
+
+void UsrManager::updateLastLogout(int uid,uint64_t t) {
+  if(!db_) return;
+  db_->execute("UPDATE users SET last_logout_time=" + std::to_string(t) + " WHERE uid=" + std::to_string(uid));
+}
+
+std::vector<Account> UsrManager::selectAllUsers() {
+  std::vector<Account> out;
+  if(!db_) return out;
+  MYSQL_RES* res = db_->query("SELECT uid,username,password_hash,salt,last_logout_time FROM users");
+  if(!res) return out;
+  MYSQL_ROW row;
+  while((row = mysql_fetch_row(res))) {
+    Account a;
+    a.uid = std::stoi(row[0]);
+    a.username = row[1] ? row[1] : "";
+    a.password_hash = row[2] ? row[2] : "";
+    a.salt = row[3] ? row[3] : "";
+    a.last_logout_time = row[4] ? std::strtoull(row[4],nullptr,10) : 0;
+    out.push_back(a);
+  }
+  mysql_free_result(res);
+  return out;
 }
 
 // 好友管理相关
@@ -185,7 +189,6 @@ std::vector<int> FriendManager::list_request(int uid) {
   if(it == requests_.end()) return res;
 
   for(int f : it->second) {
-    std::cout << f << std::endl;
     res.push_back(f);
   }
   return res;
@@ -193,14 +196,12 @@ std::vector<int> FriendManager::list_request(int uid) {
 
 int FriendManager::del(int uid1,int uid2) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  if(!deleteFriendPair(uid1,uid2)) return -1;
   auto it1 = friends_.find(uid1);
   if(it1 != friends_.end()) it1->second.erase(uid2);
-
   auto it2 = friends_.find(uid2);
   if(it2 != friends_.end()) it2->second.erase(uid1);
 
-  save(FRIENDDATA);
   return 0;
 }
 
@@ -211,29 +212,42 @@ int FriendManager::request(int from_uid,int to_uid) {
   if(requests_[to_uid].count(from_uid)) {
     return 3; //已发送过申请
   }
+  if(!insertFriendRequest(from_uid,to_uid)) return -1;
   requests_[to_uid].insert(from_uid);
-  save(FRIENDDATA);
   return 0;
 }
 
 int FriendManager::agree(int uid1,int uid2) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  if(db_) {
+    db_->begin();
+    if(!(insertFriend(uid1,uid2) && insertFriend(uid2,uid1) && deleteFriendRequest(uid1,uid2))) {
+      db_->rollback();
+      return -1;
+    }
+    db_->commit();
+  }
   friends_[uid1].insert(uid2);
   friends_[uid2].insert(uid1);
   if(requests_[uid1].count(uid2)) requests_[uid1].erase(uid2);
   if(requests_[uid2].count(uid1)) requests_[uid2].erase(uid1);
   
-  save(FRIENDDATA);
   return true;
 }
 
 int FriendManager::reject(int uid1,int uid2) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  if(db_) {
+    db_->begin();
+    if(!deleteFriendRequest(uid1,uid2)) {
+      db_->rollback();
+      return -1;
+    }
+    db_->commit();
+  }
   if(requests_[uid1].count(uid2)) requests_[uid1].erase(uid2);
   if(requests_[uid2].count(uid1)) requests_[uid2].erase(uid1);
-  save(FRIENDDATA);
+
   return true;
 }
 
@@ -256,7 +270,7 @@ bool FriendManager::isFriend_(int uid1,int uid2) {
 
 bool FriendManager::removeUsr(int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
-
+  if(!deleteUserAll(uid)) return false;
   friends_.erase(uid);
   requests_.erase(uid);
   block_.erase(uid);
@@ -265,7 +279,7 @@ bool FriendManager::removeUsr(int uid) {
   for(auto& [u,set] : requests_) set.erase(uid);
   for(auto& [u,set] : block_) set.erase(uid);
 
-  save(FRIENDDATA);
+
   return true;
 }
 
@@ -273,15 +287,15 @@ bool FriendManager::removeUsr(int uid) {
 int FriendManager::block(int uid,int target) {
   std::lock_guard lock(mtx_);
   if(!isFriend_(uid,target)) return -1; // 只能屏蔽好友
+  if(!insertBlock(uid,target)) return -1;
   block_[uid].insert(target);
-  save(FRIENDDATA);
   return 0;
 }
 
 int FriendManager::unblock(int uid,int target) {
   std::lock_guard lock(mtx_);
+  if(!deleteBlock(uid,target)) return -1;
   block_[uid].erase(target);
-  save(FRIENDDATA);
   return 0;
 }
 
@@ -305,199 +319,179 @@ std::vector<int> FriendManager::getBlockList(int uid) {
   return result;
 }
 
-bool FriendManager::load(const std::string& path) {
-  std::ifstream ifs(path);
-
-  if(!ifs.is_open()) return false;
-
-  nlohmann::json j;
-  ifs >> j;
-
+bool FriendManager::load() {
+  std::lock_guard<std::mutex> lock(mtx_);
   friends_.clear();
   requests_.clear();
-
-  if(j.contains("friends")) {
-    for(auto& [uid, arr] : j["friends"].items()) {
-      int id = std::stoi(uid);
-      for(auto& x : arr) {
-        friends_[id].insert(x.get<int>());
-      }
-    }
-  }
-
-  if(j.contains("requests")) {
-    for(auto& [uid, arr] : j["requests"].items()) {
-      int id = std::stoi(uid);
-      for(auto& x : arr) {
-        requests_[id].insert(x.get<int>());
-      }
-    }
-  }
-
-  if(j.contains("block")) {
-    for(auto& [uid, arr] : j["block"].items()) {
-      int id = std::stoi(uid);
-      for(auto& x : arr) {
-        block_[id].insert(x.get<int>());
-      }
-    }
-  }
+  block_.clear();
+  loadFriends();
+  loadRequests();
+  loadBlocks();
   return true;
 }
 
-bool FriendManager::save(const std::string& path) {
-  nlohmann::json j;
-  // 保存好友
-  for(const auto& [uid, list] : friends_) {
-    for(int id : list) {
-      j["friends"][std::to_string(uid)].push_back(id);
-    }
-  }
-  // 保存好友申请
-  for(const auto& [uid, list] : requests_) {
-    for(int id : list) {
-      j["requests"][std::to_string(uid)].push_back(id);
-    }
-  }
-  // 保存屏蔽列表
-  for(const auto& [uid, set] : block_) {
-    for(int blocked_uid : set) {
-      j["block"][std::to_string(uid)].push_back(blocked_uid);
-    }
-  }
-  std::ofstream ofs(path);
-  if(!ofs.is_open()) return false;
+bool FriendManager::insertFriend(int a,int b) {
+  if(!db_) return false;
+  return db_->execute("INSERT INTO friends (uid1,uid2) VALUES (" +
+    std::to_string(a) + "," + std::to_string(b) + ")");
+}
 
-  ofs << std::setw(4) << j;
+bool FriendManager::deleteFriendPair(int a,int b) {
+  if(!db_) return false;
+  return db_->execute("DELETE FROM friends WHERE (uid1=" + std::to_string(a) +
+    " AND uid2=" + std::to_string(b) + ") OR (uid1=" + std::to_string(b) +
+    " AND uid2=" + std::to_string(a) + ")");
+}
+
+bool FriendManager::insertFriendRequest(int from,int to) {
+  if(!db_) return false;
+  return db_->execute("INSERT INTO friend_requests (from_uid,to_uid,apply_time) VALUES (" +
+    std::to_string(from) + "," + std::to_string(to) + "," + std::to_string(now_ms()) + ")");
+}
+
+bool FriendManager::deleteFriendRequest(int a,int b) {
+  if(!db_) return false;
+  return db_->execute("DELETE FROM friend_requests WHERE (from_uid=" + std::to_string(a) +
+    " AND to_uid=" + std::to_string(b) + ") OR (from_uid=" + std::to_string(b) +
+    " AND to_uid=" + std::to_string(a) + ")");
+}
+
+bool FriendManager::insertBlock(int uid,int target) {
+  if(!db_) return false;
+  return db_->execute("INSERT INTO blocks (uid,block_uid) VALUES (" +
+    std::to_string(uid) + "," + std::to_string(target) + ")");
+}
+
+bool FriendManager::deleteBlock(int uid,int target) {
+  if(!db_) return false;
+  return db_->execute("DELETE FROM blocks WHERE uid=" + std::to_string(uid) +
+    " AND block_uid=" + std::to_string(target));
+}
+
+bool FriendManager::deleteUserAll(int uid) {
+  if(!db_) return false;
+  db_->execute("DELETE FROM friends WHERE uid1=" + std::to_string(uid) + " OR uid2=" + std::to_string(uid));
+  db_->execute("DELETE FROM friend_requests WHERE from_uid=" + std::to_string(uid) + " OR to_uid=" + std::to_string(uid));
+  db_->execute("DELETE FROM blocks WHERE uid=" + std::to_string(uid) + " OR block_uid=" + std::to_string(uid));
   return true;
+}
+
+void FriendManager::loadFriends() {
+  if(!db_) return;
+  MYSQL_RES* res = db_->query("SELECT uid1,uid2 FROM friends");
+  if(!res) return;
+  MYSQL_ROW row;
+  while((row = mysql_fetch_row(res))) {
+    int a = std::atoi(row[0]), b = std::atoi(row[1]);
+    friends_[a].insert(b);
+  }
+  mysql_free_result(res);
+}
+
+void FriendManager::loadRequests() {
+  if(!db_) return;
+  MYSQL_RES* res = db_->query("SELECT from_uid,to_uid FROM friend_requests");
+  if(!res) return;
+  MYSQL_ROW row;
+  while((row = mysql_fetch_row(res))) {
+    int a = std::atoi(row[0]), b = std::atoi(row[1]);
+    requests_[a].insert(b);
+  }
+  mysql_free_result(res);
+}
+
+void FriendManager::loadBlocks() {
+  if(!db_) return;
+  MYSQL_RES* res = db_->query("SELECT uid,block_uid FROM blocks");
+  if(!res) return;
+  MYSQL_ROW row;
+  while((row = mysql_fetch_row(res))) {
+    int a = std::atoi(row[0]), b = std::atoi(row[1]);
+    block_[a].insert(b);
+  }
+  mysql_free_result(res);
 }
 
 // 消息管理相关
 int MessageManager::add(const Message& msg) {
-  std::lock_guard lock(mtx_);
-  std::string cvs_id;
-  if(msg.chat_type == "group") {
-    cvs_id = groupId(msg.target_id);
-  } else {
-    cvs_id = privateId(msg.from_uid,msg.target_id);
+  if(!db_) return -1;
+  std::string sql = 
+    "INSERT INTO messages (message_id,type,chat_type,from_uid,target_id,content,msg_time,status) VALUES ('"
+    + db_->escape(msg.message_id) + "','"
+    + db_->escape(msg.type) + "','"
+    + db_->escape(msg.chat_type) + "',"
+    + std::to_string(msg.from_uid) + ","
+    + std::to_string(msg.target_id) + ",'"
+    + db_->escape(msg.content) + "',"
+    + std::to_string(msg.time) + ","
+    + std::to_string(msg.status) + ")";
+  if(db_->execute(sql)) {
+    return 0;
   }
-  history_[cvs_id].push_back(msg);
-  save(PCHATDATA);
-  return 0;
+  return -1;
 }
 
 std::vector<Message> MessageManager::getMessagesByTime(int uid,uint64_t time) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  std::vector<Message> result;
-  for(auto& [key, msgs] : history_) {
-    bool group_key = (key.rfind("group_",0) == 0);
-    for(auto& msg : msgs) {
-      if(group_key) {
-        if(msg.time > time) result.push_back(msg);
-      } else {
-        if((msg.from_uid == uid || msg.target_id == uid) && msg.time > time) {
-          result.push_back(msg);
-        }
-      }
-    }
-  }
-  std::sort(result.begin(),result.end(),[](const Message& a,const Message& b) { return a.time < b.time; });
-  return result;
-}
-
-std::vector<Message> MessageManager::getHistory(int uid1,int uid2) {
-  std::lock_guard lock(mtx_);
-  std::string cvs_id = privateId(uid1,uid2);
-  auto it = history_.find(cvs_id);
-  if(it == history_.end()) {
-    return {};
-  }
-  return it->second;
+  return queryMessages(uid,time);
 }
 
 std::vector<Message> MessageManager::getAllMsg(int uid) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  std::vector<Message> result;
-  for(const auto& [key,msgs] : history_) {
-    bool group_key = (key.rfind("group_",0) == 0);
-    for(const auto& msg : msgs) {
-      if(group_key || msg.from_uid == uid || msg.target_id == uid) {
-        result.push_back(msg);
-      }
-    }
-  }
-  std::sort(result.begin(),result.end(),
-    [](const Message& a,const Message& b){
-      return a.time < b.time;
-    });
-
-  return result;
+  return queryMessages(uid,0);
 }
 
 std::string MessageManager::getMsgId() {
   uint64_t ms = now_ms();
-
   uint64_t i = count++;
   return std::to_string(ms) + "_" + std::to_string(i);
 }
 
-bool MessageManager::removeUsr(int uid) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  for(auto it = history_.begin(); it != history_.end(); ) {
-    auto& msgs = it->second;
-    bool group_key = (it->first.rfind("group_",0) == 0);
-    msgs.erase(std::remove_if(msgs.begin(), msgs.end(),
-      [uid,group_key](const Message& m) {
-        // if(group_key) return m.from_uid == uid;
-        return m.from_uid == uid || m.target_id == uid;
-      }), msgs.end());
-    if(msgs.empty()) it = history_.erase(it);
-    else it++;
-  }
-  save(PCHATDATA);
-  return true;
-}
-
-bool MessageManager::save(const std::string& path) {
+bool MessageManager::removeGroupMessages(int gid) {
   // std::lock_guard<std::mutex> lock(mtx_);
-  nlohmann::json j;
-  // 保存聊天记录
-  for(const auto& [key, msgs] : history_) {
-    j["history"][key] = msgs;
-  }
-  // 保存计数器
-  j["count"] = count.load();
-  std::ofstream ofs(path);
-  if(!ofs.is_open()) {
-    return false;
-  }
-  ofs << std::setw(4) << j;
+  if(!db_) return false;
+  return db_->execute("DELETE FROM messages WHERE chat_type='group' AND target_id=" + std::to_string(gid));
+}
+
+bool MessageManager::removeUsr(int uid) {
+  if(!db_) return false;
+  db_->execute("DELETE FROM messages WHERE chat_type='private' AND (from_uid=" + std::to_string(uid) +" OR target_id=" + std::to_string(uid) + ")");
   return true;
 }
 
-bool MessageManager::load(const std::string& path) {
-  std::lock_guard<std::mutex> lock(mtx_);
-  std::ifstream ifs(path);
-  if (!ifs.is_open()) {
-    return false;
+std::vector<Message> MessageManager::queryMessages(int uid,uint64_t time) {
+  std::vector<Message> result;
+  if(!db_) return result;
+  std::string sql =
+    "SELECT message_id,type,chat_type,from_uid,target_id,content,msg_time,status FROM messages WHERE ("
+      "(chat_type='private' AND (from_uid=" + std::to_string(uid) +
+      " OR target_id=" + std::to_string(uid) + "))"
+      " OR "
+      "(chat_type='group'"
+        " AND target_id IN (SELECT group_id FROM group_members WHERE uid=" + std::to_string(uid) + ")"
+        " AND msg_time >= (SELECT join_time FROM group_members WHERE uid=" + std::to_string(uid) + " AND group_id=target_id)"
+      ")"
+    ") AND msg_time >=" + std::to_string(time) +
+    " ORDER BY msg_time";
+  MYSQL_RES* res = db_->query(sql);
+  if(!res) return result;
+  MYSQL_ROW row;
+  while((row = mysql_fetch_row(res))) {
+    result.push_back(rowToMessage(row));
   }
-  nlohmann::json j;
-  ifs >> j;
-  history_.clear();
-  // offline_msg_.clear();
-  // 恢复聊天记录
-  if(j.contains("history")) {
-    for (auto& [key, value] : j["history"].items()) {
-      history_[key] = value.get<std::vector<Message>>();
-    }
-  }
-  // 恢复计数器
-  if(j.contains("count")) {
-    count.store(j["count"].get<uint64_t>());
-  } else {
-    count.store(0);
-  }
-  return true;
+  mysql_free_result(res);
+  return result;
+}
+
+Message MessageManager::rowToMessage(MYSQL_ROW row) {
+  Message m;
+  m.message_id = row[0] ? row[0] : "";
+  m.type = row[1] ? row[1] : "";
+  m.chat_type = row[2] ? row[2] : "";
+  m.from_uid = std::stoi(row[3]);
+  m.target_id = std::stoi(row[4]);
+  m.content = row[5] ? row[5] : "";
+  m.time = std::strtoull(row[6],nullptr,10);
+  m.status = std::stoi(row[7]);
+  return m;
 }
 
 // 群管理相关
@@ -510,7 +504,6 @@ int GroupManager::createGroup(const User& owner,std::string& name,int& out_gid) 
     owner.uid,
     now_ms()
   };
-  groups_[gid] = info;
   GroupMember owner_info {
     owner.uid,
     owner.username,
@@ -518,10 +511,17 @@ int GroupManager::createGroup(const User& owner,std::string& name,int& out_gid) 
     info.create_time,
     0
   };
+  if(db_) {
+    db_->begin();
+    if(!(insertGroup(info) && insertGroupMember(gid,owner_info))) {
+      db_->rollback();
+      return -1;
+    }
+    db_->commit();
+  }
+  groups_[gid] = info;
   members_[gid][owner.uid] = owner_info;
-
   out_gid = gid;
-  save(GROUPDATA);
   return 0;
 }
 
@@ -530,32 +530,21 @@ int GroupManager::disbandGroup(int group_id,int uid) {
   auto it = groups_.find(group_id);
   if(it == groups_.end()) return -1; // 群不存在
   if(uid != it->second.owner_uid) return -2; // 非群主
+  if(!deleteGroup(group_id)) return -3;
   groups_.erase(it);
   members_.erase(group_id);
   join_requests_.erase(group_id);
-  save(GROUPDATA);
   return 0;
 }
 
-int GroupManager::renameGroup(int group_id,int handler_id,std::string& new_name) {
-  std::lock_guard<std::mutex> lock(mtx_);
-
-  return 0;
-}
-
-int GroupManager::transferOwner() { // 转移群主
-  std::lock_guard<std::mutex> lock(mtx_);
-
-  return 0;
-}
 // 成员管理
 int GroupManager::joinRequest(int group_id,int apply_uid) {
   std::lock_guard<std::mutex> lock(mtx_);
   if(groups_.find(group_id) == groups_.end()) return -1; // 群不存在
   if(members_[group_id].count(apply_uid)) return -2; // 已是成员
   if(join_requests_[group_id].count(apply_uid)) return -3; // 已申请
+  if(!insertJoinRequest(group_id,apply_uid)) return -4;
   join_requests_[group_id].insert(apply_uid);
-  save(GROUPDATA);
   return 0;
 }
 
@@ -573,12 +562,20 @@ int GroupManager::handleRequest(int group_id,int handler_uid,const User& target_
       now_ms(),
       0
     };
+    if(db_) {
+      db_->begin();
+      if(!(insertGroupMember(group_id,info) && deleteJoinRequest(group_id,target_usr.uid))) {
+        db_->rollback();
+        return -1;
+      }
+      db_->commit();
+    }
     mem[target_usr.uid] = info;
     req.erase(target_usr.uid);
   } else {
+    if(!deleteJoinRequest(group_id,target_usr.uid)) return -1;
     req.erase(target_usr.uid);
   }
-  save(GROUPDATA);
   return 0;
 }
 
@@ -586,9 +583,16 @@ int GroupManager::leaveGroup(int group_id,int uid) {
   std::lock_guard<std::mutex> lock(mtx_);
   auto& mem = members_[group_id];
   if(!mem.count(uid)) return -1;
-  if(mem[uid].permission == 0) return -2;  // 群主不能直接退出，应先解散或转让群主权限
+  if(mem[uid].permission == 0) return -2;  // 群主不能直接退出，应先解散
+  if(db_) {
+    db_->begin();
+    if(!deleteGroupMember(group_id,uid)) {
+      db_->rollback();
+      return -1;
+    }
+    db_->commit();
+  }
   mem.erase(uid);
-  save(GROUPDATA);
   return 0;
 }
 
@@ -600,21 +604,34 @@ int GroupManager::kickMember(int group_id,int handler_uid,int target_id) {
   int target_per = mem[target_id].permission;
   if(hand_per == 2) return -2; // 普通成员无权限
   if(hand_per == 1 && (target_per == 0 || target_per == 1)) return -3; // 管理员无权踢群主或其他管理员
+  if(db_) {
+    db_->begin();
+    if(!deleteGroupMember(group_id,target_id)) {
+      db_->rollback();
+      return -1;
+    }
+    db_->commit();
+  }
   mem.erase(target_id);
-  save(GROUPDATA);
   return 0;
 }
 
-int GroupManager::removeUser(int uid) {
+int GroupManager::removeUser(int uid,std::vector<int>* disbanded) {
   std::lock_guard<std::mutex> lock(mtx_);
   std::vector<int> owned;
   for(auto& [gid,info] : groups_) {
     if(info.owner_uid == uid) owned.push_back(gid);
   }
   for(int gid : owned) {
+    deleteGroup(gid);
     groups_.erase(gid);
     members_.erase(gid);
     join_requests_.erase(gid);
+    if(disbanded) disbanded->push_back(gid);
+  }
+  if(db_) {
+    db_->execute("DELETE FROM group_members WHERE uid=" + std::to_string(uid));
+    db_->execute("DELETE FROM group_join_requests WHERE uid=" + std::to_string(uid));
   }
   for(auto& [gid,memMap] : members_) {
     memMap.erase(uid);
@@ -622,7 +639,7 @@ int GroupManager::removeUser(int uid) {
   for(auto& [gid,reqs] : join_requests_) {
     reqs.erase(uid);
   }
-  save(GROUPDATA);
+  
   return 0;
 }
 // 管理员设置
@@ -632,11 +649,26 @@ int GroupManager::setAdmin(int group_id,int handler_uid,int target_id,bool admin
   if(!mem.count(handler_uid) || mem[handler_uid].permission != 0) return -1; // 仅群主有权限
   if(!mem.count(target_id)) return -2;
   if(admin) {
+    if(db_) {
+      db_->begin();
+      if(!updateMemberPermission(group_id,target_id,1)) {
+        db_->rollback();
+        return -1;
+      }
+      db_->commit();
+    }
     mem[target_id].permission = 1;
   } else {
+    if(db_) {
+      db_->begin();
+      if(!updateMemberPermission(group_id,target_id,2)) {
+        db_->rollback();
+        return -1;
+      }
+      db_->commit();
+    }
     mem[target_id].permission = 2;
   }
-  save(GROUPDATA);
   return 0;
 }
 // 消息免打扰设置
@@ -644,8 +676,10 @@ int GroupManager::setRemind(int group_id,int uid,int remind) {
   std::lock_guard<std::mutex> lock(mtx_);
   auto& mem = members_[group_id];
   if(!mem.count(uid)) return -1;
+  if(db_) {
+    if(!updateMemberRemind(group_id,uid,remind)) return -1;
+  }
   mem[uid].remind = remind;
-  save(GROUPDATA);
   return 0;
 }
 // 查询相关
@@ -725,82 +759,116 @@ int GroupManager::ifRemind(int group_id,int uid) {
   return -1;
 }
 
-bool GroupManager::load(const std::string& path) {
+bool GroupManager::load() {
   std::lock_guard<std::mutex> lock(mtx_);
-  std::ifstream ifs(path);
-  if(!ifs.is_open()) return false;
-  nlohmann::json j;
-  try {
-    ifs >> j;
-  } catch(...) {
-    return false;
-  }
   groups_.clear();
   members_.clear();
   join_requests_.clear();
-
-  if(j.contains("groups")) {
-    for(auto& item : j["groups"]) {
-      GroupInfo info;
-      from_json(item, info);
-      groups_[info.group_id] = info;
-    }
+  loadGroups();
+  loadMembers();
+  loadJoinRequests();
+  int max_gid = 100000;
+  for(auto& [gid,info] : groups_) {
+    if(gid > max_gid) max_gid = gid;
   }
-  if(j.contains("members")) {
-    for(auto& [gid_s, arr] : j["members"].items()) {
-      int gid = std::stoi(gid_s);
-      for(auto& item : arr) {
-        GroupMember m;
-        from_json(item, m);
-        members_[gid][m.uid] = m;
-      }
-    }
-  }
-  if(j.contains("join_requests")) {
-    for(auto& [gid_s, arr] : j["join_requests"].items()) {
-      int gid = std::stoi(gid_s);
-      for(auto& x : arr) {
-        join_requests_[gid].insert(x.get<int>());
-      }
-    }
-  }
-  if(j.contains("next_group_id")) {
-    next_group_id_.store(j["next_group_id"].get<int>());
-  } else {
-    int max_gid = 100000;
-    for(auto& [gid, info] : groups_) if(gid > max_gid) max_gid = gid;
-    next_group_id_.store(max_gid + 1);
-  }
+  next_group_id_.store(max_gid + 1);
   return true;
 }
 
-bool GroupManager::save(const std::string& path) {
-  nlohmann::json j;
-  j["groups"] = nlohmann::json::array();
-  for(auto& [gid, info] : groups_) {
-    nlohmann::json item;
-    to_json(item, info);
-    j["groups"].push_back(item);
+bool GroupManager::insertGroup(const GroupInfo& g) {
+  if(!db_) return false;
+  return db_->execute("INSERT INTO chat_groups (group_id,name,owner_uid,create_time) VALUES (" + 
+    std::to_string(g.group_id) + ",'" + db_->escape(g.name) + "'," +
+    std::to_string(g.owner_uid) + "," + std::to_string(g.create_time) + ")");
+}
+
+bool GroupManager::deleteGroup(int gid) {
+  if(!db_) return false;
+  return db_->execute("DELETE FROM chat_groups WHERE group_id=" + std::to_string(gid));
+}
+
+bool GroupManager::insertGroupMember(int gid,const GroupMember& m) {
+  if(!db_) return false;
+  return db_->execute("INSERT INTO group_members (group_id,uid,permission,join_time,remind) VALUES (" +
+    std::to_string(gid) + "," + std::to_string(m.uid) + "," + std::to_string(m.permission) + "," +
+    std::to_string(m.join_time) + "," + std::to_string(m.remind) + ")");
+}
+
+bool GroupManager::deleteGroupMember(int gid,int uid) {
+  if(!db_) return false;
+  return db_->execute("DELETE FROM group_members WHERE group_id=" + std::to_string(gid) + " AND uid=" + std::to_string(uid));
+}
+
+bool GroupManager::updateMemberPermission(int gid,int uid,int perm) {
+  if(!db_) return false;
+  return db_->execute("UPDATE group_members SET permission=" + std::to_string(perm) +
+    " WHERE group_id=" + std::to_string(gid) + " AND uid=" + std::to_string(uid));
+}
+
+bool GroupManager::updateMemberRemind(int gid,int uid,int remind) {
+  if(!db_) return false;
+  return db_->execute("UPDATE group_members SET remind=" + std::to_string(remind) +
+    " WHERE group_id=" + std::to_string(gid) + " AND uid=" + std::to_string(uid));
+}
+
+bool GroupManager::insertJoinRequest(int gid,int uid) {
+  if(!db_) return false;
+  return db_->execute("INSERT INTO group_join_requests (group_id,uid,apply_time) VALUES (" +
+    std::to_string(gid) + "," + std::to_string(uid) + "," + std::to_string(now_ms()) + ")");
+}
+
+bool GroupManager::deleteJoinRequest(int gid,int uid) {
+  if(!db_) return false;
+  return db_->execute("DELETE FROM group_join_requests WHERE group_id=" + std::to_string(gid) + " AND uid=" + std::to_string(uid));
+}
+
+void GroupManager::loadGroups() {
+  if(!db_) return;
+  MYSQL_RES* res = db_->query("SELECT group_id,name,owner_uid,create_time FROM chat_groups");
+  if(!res) return;
+  MYSQL_ROW row;
+  while(row = mysql_fetch_row(res)) {
+    GroupInfo g;
+    g.group_id = std::stoi(row[0]);
+    g.name = row[1] ? row[1] : "";
+    g.owner_uid = std::stoi(row[2]);
+    g.create_time = std::strtoull(row[3],nullptr,10);
+    groups_[g.group_id] = g;
   }
-  for(auto& [gid, memMap] : members_) {
-    nlohmann::json arr = nlohmann::json::array();
-    for(auto& [uid, m] : memMap) {
-      nlohmann::json item;
-      to_json(item, m);
-      arr.push_back(item);
-    }
-    j["members"][std::to_string(gid)] = arr;
+  mysql_free_result(res);
+}
+
+void GroupManager::loadMembers() {
+  if(!db_) return;
+  MYSQL_RES* res = db_->query(
+    "SELECT m.group_id,m.uid,m.permission,m.join_time,m.remind,u.username "
+    "FROM group_members m LEFT JOIN users u ON u.uid=m.uid");
+  if(!res) return;
+  MYSQL_ROW row;
+  while(row = mysql_fetch_row(res)) {
+    GroupMember m;
+    int gid = std::stoi(row[0]);
+    m.uid = std::stoi(row[1]);
+    m.permission = std::stoi(row[2]);
+    m.join_time = std::strtoull(row[3],nullptr,10);
+    m.remind = std::stoi(row[4]);
+    m.usr_name = row[5] ? row[5] : "";
+    members_[gid][m.uid] = m;
   }
-  for(auto& [gid, reqs] : join_requests_) {
-    nlohmann::json arr = nlohmann::json::array();
-    for(int uid : reqs) arr.push_back(uid);
-    j["join_requests"][std::to_string(gid)] = arr;
+  mysql_free_result(res);
+}
+
+void GroupManager::loadJoinRequests() {
+  if(!db_) return;
+  MYSQL_RES* res = db_->query("SELECT group_id,uid FROM group_join_requests");
+  if(!res) return;
+  MYSQL_ROW row;
+  while(row = mysql_fetch_row(res)) {
+    int gid = std::stoi(row[0]);
+    int uid = std::stoi(row[1]);
+    join_requests_[gid].insert(uid);
   }
-  j["next_group_id"] = next_group_id_.load();
-  std::ofstream ofs(path);
-  if(!ofs.is_open()) return false;
-  ofs << std::setw(4) << j;
-  return true;
+  mysql_free_result(res);
 }
 
 void SessionManager::bindUser(int user_id,std::shared_ptr<Connection> conn) {
@@ -866,7 +934,7 @@ std::shared_ptr<Connection> SessionManager::getConn(int uid) {
 }
 
 FileManager::FileManager(const std::string& meta_path,const std::string& storage_dir)
-  : meta_path_(meta_path), storage_dir_(storage_dir) {
+  : storage_dir_(storage_dir) {
   if(storage_dir_.empty() || storage_dir_.back() != '/') {
     storage_dir_.push_back('/');
   }
@@ -907,16 +975,17 @@ std::string FileManager::getPartPath(const std::string& file_id) {
 bool FileManager::addFileMeta(const FileMeta& meta) {
   std::lock_guard<std::mutex> lock(mtx_);
   if(metas_.count(meta.file_id)) return false;
+  if(!insertFileMeta(meta)) return false;
   metas_[meta.file_id] = meta;
-  return saveMeta();
+  return true;
 }
 
 bool FileManager::updateFileMeta(const FileMeta& meta) {
   std::lock_guard<std::mutex> lock(mtx_);
   auto it = metas_.find(meta.file_id);
   if(it == metas_.end()) return false;
+  if(!updateFileMetaDb(meta)) return false;
   it->second = meta;
-  saveMeta();
   return true;
 }
 
@@ -980,6 +1049,7 @@ bool FileManager::writePart(const std::string& file_id,uint64_t offset,const cha
   }
   close(fd);
   it->second.received = offset + len;
+  updateFileReceived(file_id,it->second.received);
   return true;
 }
 
@@ -1014,50 +1084,95 @@ bool FileManager::finishUpload(const std::string& file_id) {
   if(std::rename(part.c_str(),final_path.c_str()) != 0) return false;
 
   meta.status = 1;
-  return saveMeta();
+  updateFileStatus(file_id,1);
+  return true;
 }
 
 bool FileManager::removePart(const std::string& file_id) {
   std::lock_guard<std::mutex> lock(mtx_);
   std::string part = getPartPath(file_id);
   unlink(part.c_str());
+  deleteFileMetaDb(file_id);
   metas_.erase(file_id);
-  return saveMeta();
-}
-
-bool FileManager::saveMeta() {
-  nlohmann::json j;
-  j["files"] = nlohmann::json::array();
-  for(auto& [id,m] : metas_) {
-    nlohmann::json item;
-    to_json(item,m);
-    j["files"].push_back(item);
-  }
-  std::ofstream ofs(meta_path_);
-  if(!ofs.is_open()) return false;
-  ofs << std::setw(4) << j;
   return true;
 }
 
 bool FileManager::loadMeta() {
-  std::ifstream ifs(meta_path_);
-  if(!ifs.is_open()) return false;
-  nlohmann::json j;
-  try {
-    ifs >> j;
-  } catch(...) {
-    return false;
+  if(!db_) return false;
+  MYSQL_RES* res = db_->query("SELECT file_id,file_name,file_size,uploader_uid,upload_time,storage_path,file_hash,chat_type,target_id,status,received FROM file_meta");
+  if(!res) return false;
+  MYSQL_ROW row;
+  while((row = mysql_fetch_row(res))) {
+    FileMeta m;
+    m.file_id = row[0] ? row[0] : "";
+    m.file_name = row[1] ? row[1] : "";
+    m.file_size = std::strtoll(row[2],nullptr,10);
+    m.uploader_uid = std::atoi(row[3]);
+    m.upload_time = std::strtoull(row[4],nullptr,10);
+    m.storage_path = row[5] ? row[5] : "";
+    m.file_hash = row[6] ? row[6] : "";
+    m.chat_type = row[7] ? row[7] : "";
+    m.target_id = row[8] ? std::atoi(row[8]) : 0;
+    m.status = std::atoi(row[9]);
+    m.received = std::strtoull(row[10],nullptr,10);
+    metas_[m.file_id] = m;
   }
-  metas_.clear();
-  if(j.contains("files")) {
-    for(auto& item : j["files"]) {
-      FileMeta m;
-      from_json(item,m);
-      metas_[m.file_id] = m;
-    }
-  }
-  id_counter_.store(metas_.size());
+  mysql_free_result(res);
   return true;
+}
+
+bool FileManager::insertFileMeta(const FileMeta& m) {
+  if(!db_) return false;
+  return db_->execute(
+    "INSERT INTO file_meta (file_id,file_name,file_size,uploader_uid,upload_time,storage_path,file_hash,chat_type,target_id,status,received) VALUES ('"
+    + db_->escape(m.file_id) + "','"
+    + db_->escape(m.file_name) + "',"
+    + std::to_string(m.file_size) + ","
+    + std::to_string(m.uploader_uid) + ","
+    + std::to_string(m.upload_time) + ",'"
+    + db_->escape(m.storage_path) + "','"
+    + db_->escape(m.file_hash) + "','"
+    + db_->escape(m.chat_type) + "',"
+    + std::to_string(m.target_id) + ","
+    + std::to_string(m.status) + ","
+    + std::to_string(m.received) + ")"
+  );
+}
+
+bool FileManager::updateFileMetaDb(const FileMeta& m) {
+  if(!db_) return false;
+  return db_->execute(
+    "UPDATE file_meta SET file_name='" + db_->escape(m.file_name) + "',"
+    "file_size=" + std::to_string(m.file_size) + ","
+    "uploader_uid=" + std::to_string(m.uploader_uid) + ","
+    "upload_time=" + std::to_string(m.upload_time) + ","
+    "storage_path='" + db_->escape(m.storage_path) + "',"
+    "file_hash='" + db_->escape(m.file_hash) + "',"
+    "chat_type='" + db_->escape(m.chat_type) + "',"
+    "target_id=" + std::to_string(m.target_id) + ","
+    "status=" + std::to_string(m.status) + ","
+    "received=" + std::to_string(m.received)
+    + " WHERE file_id='" + db_->escape(m.file_id) + "'"
+  );
+}
+
+bool FileManager::updateFileReceived(const std::string& file_id,uint64_t received) {
+  if(!db_) return false;
+  return db_->execute("UPDATE file_meta SET received=" + std::to_string(received) +
+    " WHERE file_id='" + db_->escape(file_id) + "'"
+  );
+}
+
+bool FileManager::updateFileStatus(const std::string& file_id,int status) {
+  if(!db_) return false;
+  return db_->execute("UPDATE file_meta SET status=" + std::to_string(status) +
+    " WHERE file_id='" + db_->escape(file_id) + "'"
+  );
+}
+
+bool FileManager::deleteFileMetaDb(const std::string& file_id) {
+  if(!db_) return false;
+  return db_->execute("DELETE FROM file_meta WHERE file_id='" + db_->escape(file_id) + "'");
 }
 
 void FileManager::cleanupOrphans() {
@@ -1070,17 +1185,15 @@ void FileManager::cleanupOrphans() {
       std::filesystem::remove(entry.path(),ec);
     }
   }
-  bool changed = false;
   uint64_t now = now_ms();
   for(auto it = metas_.begin(); it != metas_.end(); ) {
     if(it->second.status == 0 && now - it->second.upload_time > UPLOAD_STALE_MS) {
       std::string part = getPartPath(it->first);
       unlink(part.c_str());
+      deleteFileMetaDb(it->first);
       it = metas_.erase(it);
-      changed = true;
     } else {
       it++;
     }
   }
-  if(changed) saveMeta();
 }
