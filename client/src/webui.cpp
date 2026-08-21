@@ -78,6 +78,10 @@ WebUI::~WebUI() {
   svr_.stop();
 }
 
+void WebUI::stop() {
+  svr_.stop();
+}
+
 bool isPortAvailable(const char* host,int port) {
   int sock = socket(AF_INET,SOCK_STREAM,0);
   if(sock < 0) return false;

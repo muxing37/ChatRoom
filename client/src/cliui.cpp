@@ -26,9 +26,9 @@ void CliUI::notifyPush() {
   pushSeq_++;
 }
 
-void CliUI::run() {
+bool CliUI::run() {
   while(running_) {
-    if(!loginMenu()) break;
+    if(!loginMenu()) return true;
     init();
     bool logout = false;
     while(running_ && !logout) {
@@ -40,6 +40,7 @@ void CliUI::run() {
     ctx_.reset();
     std::cout << "\n已退出登录，回到登录界面\n";
   }
+  return false;
 }
 
 bool CliUI::loginMenu() {

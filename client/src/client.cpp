@@ -61,50 +61,55 @@ void dispatchPush(
 }
 
 int start_client(const std::string& ip,unsigned short port) {
+  while(true) {
+    TcpClient client;
+    std::cout << "[INFO]正在连接服务器" << std::endl;
+    if(!client.connectToHost(ip.c_str(),port)) {
+      std::cout << "[ERROR]服务器连接失败，将在3秒后重试" << std::endl;
+      std::this_thread::sleep_for(std::chrono::seconds(3));
+      continue;
+    }
 
-  TcpClient client;
-  std::cout << "[INFO]正在连接服务器" << std::endl;
-  if(!client.connectToHost(ip.c_str(),port)) {
-    std::cout << "[ERROR]服务器连接失败" << std::endl;
-    return 1;
+    auto sock = client.getSocket();
+    if(!sock) {
+      std::cout << "[ERROR]服务器连接失败，将在3秒后重试" << std::endl;
+      std::this_thread::sleep_for(std::chrono::seconds(3));
+      continue;
+    }
+    std::cout << "[INFO]服务器连接成功" << std::endl;
+    std::string workpath=std::string(getenv("HOME")) + "/Download";
+    mkdir(workpath.c_str(),0755);
+
+    ClientContext ctx;
+    ClientNetwork network(sock);
+    AuthService authService(network,ctx);
+    FriendService friendService(network,ctx);
+    ChatService chatService(network,ctx);
+    GroupService groupService(network,ctx);
+    FileService fileService(network,ctx);
+
+    bool usecli = (getenv("CHAT_CLI") != nullptr);
+    network.start();
+
+    if(usecli) {
+      CliUI cli(authService,friendService,chatService,groupService,fileService,ctx);
+      network.setPushHandler([&](const nlohmann::json& push) {
+        dispatchPush(push,friendService,chatService,groupService);
+        cli.notifyPush();
+      });
+      bool exit = cli.run();
+      network.stop();
+      if(exit) break;
+    } else {
+      WebUI web(authService,friendService,chatService,groupService,fileService,ctx);
+      network.setPushHandler([&](const nlohmann::json& push) {
+        dispatchPush(push,friendService,chatService,groupService);
+        web.broadcast(push);
+      });
+      network.setDisconnectHandler([&]{ web.stop(); });
+      web.run("localhost");
+      network.stop();
+    }
   }
-
-  auto sock = client.getSocket();
-  if(!sock) {
-    std::cout << "[ERROR]服务器连接失败" << std::endl;
-    return 1;
-  }
-  std::cout << "[INFO]服务器连接成功" << std::endl;
-  std::string workpath=std::string(getenv("HOME")) + "/Download";
-  mkdir(workpath.c_str(),0755);
-
-  ClientContext ctx;
-  ClientNetwork network(sock);
-  AuthService authService(network,ctx);
-  FriendService friendService(network,ctx);
-  ChatService chatService(network,ctx);
-  GroupService groupService(network,ctx);
-  FileService fileService(network,ctx);
-
-  bool usecli = (getenv("CHAT_CLI") != nullptr);
-  network.start();
-
-  if(usecli) {
-    CliUI cli(authService,friendService,chatService,groupService,fileService,ctx);
-    network.setPushHandler([&](const nlohmann::json& push) {
-      dispatchPush(push,friendService,chatService,groupService);
-      cli.notifyPush();
-    });
-    cli.run();
-    network.stop();
-  } else {
-    WebUI web(authService,friendService,chatService,groupService,fileService,ctx);
-    network.setPushHandler([&](const nlohmann::json& push) {
-      dispatchPush(push,friendService,chatService,groupService);
-      web.broadcast(push);
-    });
-    web.run("localhost");
-  }
-
   return 0;
 }

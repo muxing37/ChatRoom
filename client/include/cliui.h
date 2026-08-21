@@ -25,7 +25,7 @@ public:
     FileService& fileService,
     ClientContext& ctx
   );
-  void run();
+  bool run();
   void notifyPush();
 
 private:

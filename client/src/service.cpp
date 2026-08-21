@@ -61,6 +61,10 @@ void ClientNetwork::setPushHandler(PushHandler handler) {
   pushHandler_=std::move(handler);
 }
 
+void ClientNetwork::setDisconnectHandler(std::function<void()> cb) {
+  disconnect_cb_ = cb;
+}
+
 void ClientNetwork::recvLoop() {
   while(running_) {
     std::string s;
@@ -75,6 +79,12 @@ void ClientNetwork::recvLoop() {
     }
     dispatch(j);
   }
+  {
+    std::lock_guard<std::mutex> lock(replyMutex_);
+    replies_.clear();
+  }
+  replyCv_.notify_all();
+  if(disconnect_cb_) disconnect_cb_();
 }
 
 void ClientNetwork::dispatch(const json& j) {

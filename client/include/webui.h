@@ -24,6 +24,7 @@ public:
 
   // 启动 HTTP + WebSocket 服务器（阻塞）
   void run(const char* host = "localhost");
+  void stop();
   // 广播 JSON 消息给所有已连接的 WebSocket 客户端（推送/文件进度等）
   void broadcast(const nlohmann::json& msg);
 

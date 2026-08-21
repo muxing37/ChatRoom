@@ -30,6 +30,7 @@ public:
   json request(json j);
 
   void setPushHandler(PushHandler handler);
+  void setDisconnectHandler(std::function<void()> cb);
 
 private:
   void recvLoop();
@@ -45,6 +46,7 @@ private:
   std::condition_variable replyCv_;
   std::unordered_map<std::string,json> replies_;
   PushHandler pushHandler_;
+  std::function<void()> disconnect_cb_;
   std::atomic<uint64_t> requestCounter_{1};
 };
 
