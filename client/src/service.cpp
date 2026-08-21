@@ -184,6 +184,7 @@ bool AuthService::delauth(const std::string& password) {
 FriendService::FriendService(ClientNetwork& network,ClientContext& context) : network_(network),ctx_(context) {}
 
 int FriendService::request(int uid) {
+  if(uid == ctx_.getSelf().uid) return -1;
   nlohmann::json j;
   j["type"] = "friend";
   j["action"] = "request";
