@@ -243,7 +243,7 @@ void CliUI::chatLoop(int peerId,bool isGroup) {
   }
   chatPrinted_ = hist.size();
   shownSeq_ = pushSeq_.load();
-  std::cout << "进入" << title << "，输入 /exit 退出，/upload 发送文件，/download 发送文件\n";
+  std::cout << "进入" << title << "，输入 /exit 退出，/upload 发送文件，/download 下载文件\n";
 
   std::string line;
   while(running_) {

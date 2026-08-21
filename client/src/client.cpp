@@ -61,17 +61,19 @@ void dispatchPush(
 }
 
 int start_client(const std::string& ip,unsigned short port) {
+
   TcpClient client;
   if(!client.connectToHost(ip.c_str(),port)) {
-
+    std::cout << "[ERROR]服务器连接失败" << std::endl;
     return 1;
   }
 
   auto sock = client.getSocket();
   if(!sock) {
-
+    std::cout << "[ERROR]服务器连接失败" << std::endl;
     return 1;
   }
+  std::cout << "[INFO]服务器连接成功" << std::endl;
   std::string workpath=std::string(getenv("HOME")) + "/Download";
   mkdir(workpath.c_str(),0755);
 
@@ -102,5 +104,6 @@ int start_client(const std::string& ip,unsigned short port) {
     });
     web.run("localhost");
   }
+
   return 0;
 }

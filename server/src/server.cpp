@@ -16,7 +16,6 @@ const std::string GROUPDATA = SAVEPATH + "/groupdata.json";
 
 constexpr size_t FILE_CHUNK = 1024 * 1024; // 数据块
 constexpr int DATA_ACCEPT_TIMEOUT_MS = 15000; // 连接超时
-constexpr int64_t MAX_FILE_SIZE = 2LL * 1024 * 1024 * 1024; // 单文件大小上限（QQ 4GB,微信 1GB）
 
 struct UploadSession {
   std::string file_id;
@@ -358,7 +357,7 @@ void Session::handleUserAction(const nlohmann::json& j) {
         sessionManager.unbindUser(del_uid);
         returnReply(j,0,reply);
         authed_ = false;
-        conn_->handleClose();
+        // conn_->handleClose();
         return;
       }
     }

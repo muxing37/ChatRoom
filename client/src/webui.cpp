@@ -91,8 +91,8 @@ bool isPortAvailable(const char* host,int port) {
 }
 
 void WebUI::run(const char* host) {
-  // 限制 2GB 上传上限
-  svr_.set_payload_max_length(2LL * 1024 * 1024 * 1024);
+  // 限制上传上限
+  svr_.set_payload_max_length(MAX_FILE_SIZE);
   setupRoutes();
   int start_port = 8080;
   int port = start_port;
@@ -662,9 +662,9 @@ void WebUI::setupRoutes() {
         res.set_content(R"({"status":-2})","application/json");
         return;
       }
-      if((int64_t)f.content.size() > 2LL * 1024 * 1024 * 1024) {
+      if((int64_t)f.content.size() > MAX_FILE_SIZE) {
         res.set_content(R"({"status":-3})","application/json");
-        return; // 超过 2GB
+        return; // 超过大小限制
       }
       std::string tmp = "/tmp/chat_upload_" + std::to_string(ctx_.getSelf().uid) + "_" + std::to_string(now_ms());
       {
