@@ -3,7 +3,7 @@
 
 int main(int argc,char **argv) {
     google::InitGoogleLogging(argv[0]);
-    // FLAGS_logtostderr = true;
+    FLAGS_logtostderr = true;
     FLAGS_log_dir = "./logs";
     mkdir(FLAGS_log_dir.c_str(),0755);
     unsigned short port = 2100;
