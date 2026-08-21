@@ -63,6 +63,7 @@ void dispatchPush(
 int start_client(const std::string& ip,unsigned short port) {
 
   TcpClient client;
+  std::cout << "[INFO]正在连接服务器" << std::endl;
   if(!client.connectToHost(ip.c_str(),port)) {
     std::cout << "[ERROR]服务器连接失败" << std::endl;
     return 1;

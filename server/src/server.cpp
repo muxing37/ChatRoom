@@ -863,20 +863,30 @@ void Session::fileServer(nlohmann::json j) {
     // 权限校验
     if(chat_type == "private") {
       if(!friendManager.isFriend(self_uid,target_id)) {
-        reply["error"]="not friends"; returnReply(j,-1,reply);
+        reply["error"]="not friends";
+        returnReply(j,-1,reply);
+        return;
+      }
+      if(friendManager.isBlocked(target_id,self_uid)) {
+        nlohmann::json reply;
+        reply["error"] = "blocked by receiver";
+        returnReply(j,-1,reply);
         return;
       }
     } else if(chat_type == "group") {
       if(!groupManager.isMember(target_id,self_uid)) {
-        reply["error"]="not member"; returnReply(j,-1,reply);
+        reply["error"]="not member";
+        returnReply(j,-1,reply);
         return;
       }
     } else {
-      reply["error"]="invalid chat_type"; returnReply(j,-1,reply);
+      reply["error"]="invalid chat_type";
+      returnReply(j,-1,reply);
       return;
     }
     if(file_name.empty() || file_size <= 0 || file_size > MAX_FILE_SIZE) {
-      reply["error"]="invalid file"; returnReply(j,-1,reply);
+      reply["error"]="invalid file";
+      returnReply(j,-1,reply);
       return;
     }
 
@@ -900,7 +910,8 @@ void Session::fileServer(nlohmann::json j) {
       auto me = fileManager.getFileMeta(file_id);
       if(!me) {
         reply["error"]="file not found";
-        returnReply(j,-1,reply); return;
+        returnReply(j,-1,reply);
+        return;
       }
       if(me->uploader_uid != self_uid) {
         reply["error"]="no permission";
