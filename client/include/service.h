@@ -27,7 +27,8 @@ public:
   void stop();
 
   bool send(const json& j);
-  json request(json j);
+  json request(json& j);
+  bool requestWithoutWait(json& j,std::function<void(const json& reply)> cb);
 
   void setPushHandler(PushHandler handler);
   void setDisconnectHandler(std::function<void()> cb);
@@ -48,6 +49,8 @@ private:
   PushHandler pushHandler_;
   std::function<void()> disconnect_cb_;
   std::atomic<uint64_t> requestCounter_{1};
+  std::mutex asyncMtx_;
+  std::unordered_map<std::string,std::function<void(const json& reply)>> abs_;
 };
 
 class AuthService {

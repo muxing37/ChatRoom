@@ -62,6 +62,10 @@ a:hover { text-decoration:underline; }
   border-top-color:var(--accent3); animation:spin .8s linear infinite; }
 #loading p{ color:var(--text-dim); font-size:14px; letter-spacing:2px; }
 @keyframes spin { to{ transform:rotate(360deg); } }
+/* ===== 发送中（pending 消息）状态 ===== */
+.pend-spin{ display:inline-block; width:10px; height:10px; vertical-align:-1px; border-radius:50%;
+  border:2px solid rgba(128,128,128,.35); border-top-color:#666; animation:spin .8s linear infinite; }
+.pend-line{ display:flex; align-items:center; gap:6px; }
 
 /* ===== 客户端离线遮罩（心跳检测到客户端进程停止） ===== */
 #clientDown{ display:none; position:fixed; inset:0; z-index:500; background:rgba(8,14,26,.82);
@@ -664,6 +668,7 @@ const S = {
   msgHasMore: false,       // 是否还有更早消息未加载
   groupMembers: {},        // gid -> {uid: name} 群成员名缓存（方案A：实时预览查发送者名）
   unread: {},              // key -> 未读数
+  pendingText: {},         // key -> 发送中(pending)消息队列，元素 {id}
   myPerm: {},              // 各群自己权限缓存 {gid:permission}
   groupJoinReqs: {},       // gid -> 入群申请列表（登录同步 + push 增量）
   lastLogoutTime: 0,       // 新增：上次下线时刻（服务端下发，标记离线新消息）
@@ -1104,7 +1109,7 @@ async function doRegister(){
 function resetUI(){
   // 登出/注销：清空所有草稿（属于该用户的会话输入缓存）
   if(S.self) try{ Object.keys(localStorage).filter(k=>k.startsWith('chatroom_draft_'+S.self.uid)).forEach(k=>localStorage.removeItem(k)); }catch(_){}
-  S.self=null; S.active=null; S.friends=[]; S.groups=[]; S.friendReqs=[]; S.unread={}; S.myPerm={}; S.groupJoinReqs={}; S.rendered.clear();
+  S.self=null; S.active=null; S.friends=[]; S.groups=[]; S.friendReqs=[]; S.unread={}; S.pendingText={}; S.myPerm={}; S.groupJoinReqs={}; S.rendered.clear();
   S.uploading=false; dlActive=false; dlCard=null; upMsg=null;   // 清理传输状态（防登出时残留卡死）
   S.lastLogoutTime=0; S.offlineSepDone=false;
   if(ws){ ws.onclose=null; ws.close(); }
@@ -1296,6 +1301,21 @@ function renderList(){
   if(S.tab==='friends') renderFriends();
   else if(S.tab==='groups') renderGroups();
   else renderRequests();
+}
+// 合并高频列表刷新：同一帧内多次消息推送只重绘一次列表，避免每条消息重建整个侧栏 DOM
+let listRenderQueued=false;
+function scheduleRenderList(){
+  if(listRenderQueued) return;
+  listRenderQueued=true;
+  requestAnimationFrame(()=>{ listRenderQueued=false; renderList(); });
+}
+// 合并高频"标记已读"：同一会话每秒最多上报一次，避免每条消息都发一个 HTTP 请求
+const markReadDebounce={};
+function scheduleMarkRead(peer){
+  const now=Date.now();
+  if(markReadDebounce[peer] && now-markReadDebounce[peer]<1000) return;
+  markReadDebounce[peer]=now;
+  api('/api/messages/read',{peer_id:peer}).catch(()=>{});
 }
 function bumpConversation(kind,id){
   const arr = kind==='private' ? S.friends : S.groups;
@@ -1633,6 +1653,32 @@ function renderMsg(m){
   // 文本消息带 data-raw（右键复制用）；文件消息无需复制
   return `<div class="row ${mine?'mine':'other'}${av?' has-av':''}"${raw?` data-raw="${esc(raw)}"`:''}>${avCol}${bodyCol}</div>`;
 }
+// 发送中的 pending 气泡（乐观显示，收到服务端回显后由 handlePush 替换为正式消息）
+function renderPendingMsg(id, text){
+  const a=S.active;
+  const av=msgAvatar({from_uid:S.self.uid, chat_type:a?a.kind:'private', target_id:a?a.id:0});
+  const avCol = av ? `<div class="av-col">${av}</div>` : '';
+  return `<div class="row mine has-av" data-pend="${id}">
+    ${avCol}
+    <div class="content-col">
+      <div class="pend-line">
+        <span class="pend-spin"></span>
+        <div class="bubble">
+          <div class="text">${linkify(text)}</div>
+        </div>
+      </div>
+      <span class="time">${fmtTime(Date.now())}</span>
+    </div>
+  </div>`;
+}
+// 移除某会话最早的 pending 行（服务端回显到达时调用，按发送顺序匹配）
+function removePending(k){
+  const arr=S.pendingText[k];
+  if(!arr || !arr.length) return;
+  const pend=arr.shift();
+  const el=document.querySelector('[data-pend="'+pend.id+'"]');
+  if(el) el.remove();
+}
 // 输入框随内容自适应高度（上限 120px）；文字占满后才显示滚动条
 function autoResizeInput(){
   const t=document.getElementById('msgInput');
@@ -1646,20 +1692,28 @@ async function sendMessage(){
   if(!text||!S.active) return;
   if(msgCharCount(text) > MSG_MAX_LEN){ toast('消息过长（上限 '+MSG_MAX_LEN+' 字）','err'); return; }
   const a=S.active;
+  const k=keyOf(a.kind,a.id);
+  // 乐观显示：立即插入"发送中"pending 气泡，收到服务端回显后由 handlePush 替换为正式消息
+  const pendId='pend_'+Date.now()+'_'+Math.floor(Math.random()*1000);
+  (S.pendingText[k]=S.pendingText[k]||[]).push({id:pendId});
+  const box=document.getElementById('messages');
+  box.insertAdjacentHTML('beforeend', renderPendingMsg(pendId, text));
+  scrollToBottomIfStick(); debounceStick();
+  // 本地更新该会话最后消息预览 + 置顶
+  const entry = a.kind==='private' ? S.friends.find(x=>x.uid===a.id) : S.groups.find(x=>x.group_id===a.id);
+  if(entry){ entry.last_msg=text; entry.last_from='我'; entry.last_time=Date.now(); }
+  bumpConversation(a.kind,a.id); scheduleRenderList();
   let r=null;
   try{
     r = a.kind==='private'
       ? await api('/api/message/send',{to_uid:a.id,content:text})
       : await api('/api/message/group',{gid:a.id,content:text});
-  }catch(_){ toast('发送失败：网络错误','err'); return; }
+  }catch(_){ removePending(k); toast('发送失败：网络错误','err'); return; }
   if(r.status===0){
     input.value=''; autoResizeInput(); saveDraft(); updateCharCount();   // 清空输入后同步字数归零
-    // 自己发送成功：本地更新该会话最后消息预览（等 loadMessages 后置顶）
-    const entry = a.kind==='private' ? S.friends.find(x=>x.uid===a.id) : S.groups.find(x=>x.group_id===a.id);
-    if(entry){ entry.last_msg=text; entry.last_from='我'; entry.last_time=Date.now(); }
-    bumpConversation(a.kind,a.id); stickToBottom=true; renderList(); await loadMessages();
+    // 正式消息由服务端回显 push 渲染（handlePush 会替换 pending 气泡），不再 loadMessages 全量历史
   }
-  else toast('发送失败');
+  else { removePending(k); toast('发送失败','err'); }
 }
 // Enter 发送，Shift+Enter 换行；输入时自适应高度
 const _msgInput=document.getElementById('msgInput');
@@ -1980,33 +2034,42 @@ async function remindOp(gid){
 // ================== WebSocket 推送 ==================
 async function handlePush(p){
   const t=p.type;
+  if(t==='system' && p.action==='kicked'){   // 新增：被顶号
+    toast((p.data&&p.data.reason)?p.data.reason:'你已被下线','err');
+    resetUI();   // 回登录页
+    return;
+  }
   if(t==='chat'){
     const m=p.data;
     if(m.chat_type==='private'){
       const peer=(m.from_uid===S.self.uid)?m.target_id:m.from_uid;
       const k=keyOf('private',peer);
+      const mine=(m.from_uid===S.self.uid);
+      if(mine) removePending(k);   // 自己的消息回显：移除对应"发送中"pending 气泡
       if(S.active&&S.active.kind==='private'&&S.active.id===peer){
         if(!S.rendered.has(m.message_id)){
           S.rendered.add(m.message_id);
-          if(m.from_uid===S.self.uid && m.type==='file') removeLocalUp();   // 服务端真实消息到达：移除本地乐观气泡
+          if(mine && m.type==='file') removeLocalUp();   // 服务端真实消息到达：移除本地上传气泡
           const box=document.getElementById('messages');
           // 私聊：不插新消息分隔线，直接追加
           box.insertAdjacentHTML('beforeend',renderMsg(m));
           scrollToBottomIfStick(); debounceStick();
         }
-        api('/api/messages/read',{peer_id:peer}).catch(()=>{});
-      } else { S.unread[k]=(S.unread[k]||0)+1; toast('新私聊消息'); notifyUser('新私聊消息', (p.data.username||'')+'：'+(m.type==='file'?'[文件]':m.content||'')); }
+        if(!mine) scheduleMarkRead(peer);
+      } else if(!mine) { S.unread[k]=(S.unread[k]||0)+1; toast('新私聊消息'); notifyUser('新私聊消息', (p.data.username||'')+'：'+(m.type==='file'?'[文件]':m.content||'')); }
       // 本地更新该会话的最后消息预览 + 置顶
       const f=S.friends.find(x=>x.uid===peer);
-      if(f){ f.last_msg = m.type==='file' ? (isImage(((m.content||'').match(/"file_name":"([^"]*)"/)||[])[1]||'') ? '[图片]' : '[文件]') : (m.content||''); f.last_from = (m.from_uid===S.self.uid)?'我':(p.data.username||''); f.last_time=m.time; }
+      if(f){ f.last_msg = m.type==='file' ? (isImage(((m.content||'').match(/"file_name":"([^"]*)"/)||[])[1]||'') ? '[图片]' : '[文件]') : (m.content||''); f.last_from = mine?'我':(p.data.username||''); f.last_time=m.time; }
       bumpConversation('private',peer);    // 置顶该好友
-      renderList();                        // 刷新排序
+      scheduleRenderList();                // 合并刷新排序
     } else {
       const k=keyOf('group',m.target_id);
+      const mine=(m.from_uid===S.self.uid);
+      if(mine) removePending(k);   // 自己的消息回显：移除对应"发送中"pending 气泡
       if(S.active&&S.active.kind==='group'&&S.active.id===m.target_id){
         if(!S.rendered.has(m.message_id)){
           S.rendered.add(m.message_id);
-          if(m.from_uid===S.self.uid && m.type==='file') removeLocalUp();   // 服务端真实消息到达：移除本地乐观气泡
+          if(mine && m.type==='file') removeLocalUp();   // 服务端真实消息到达：移除本地上传气泡
           const box=document.getElementById('messages');
           if(!stickToBottom && !nearBottom(box)){
             if(!sepInserted){ box.insertAdjacentHTML('beforeend','<div class="new-msg-sep">新消息</div>'); sepInserted=true; }
@@ -2014,19 +2077,19 @@ async function handlePush(p){
           box.insertAdjacentHTML('beforeend',renderMsg(m));
           scrollToBottomIfStick(); debounceStick();
         }
-        api('/api/messages/read',{peer_id:m.target_id}).catch(()=>{});
-      } else { S.unread[k]=(S.unread[k]||0)+1; toast('新群消息'); notifyUser('群消息', '群「'+(p.data.group_name||'')+'」：'+(m.type==='file'?'[文件]':m.content||'')); }
+        if(!mine) scheduleMarkRead(m.target_id);
+      } else if(!mine) { S.unread[k]=(S.unread[k]||0)+1; toast('新群消息'); notifyUser('群消息', '群「'+(p.data.group_name||'')+'」：'+(m.type==='file'?'[文件]':m.content||'')); }
       const g=S.groups.find(x=>x.group_id===m.target_id);
       if(g){
         g.last_msg = m.type==='file' ? (isImage(((m.content||'').match(/"file_name":"([^"]*)"/)||[])[1]||'') ? '[图片]' : '[文件]') : (m.content||'');
         // 发送者名：从群成员缓存查（方案A）；查不到用 uid 兜底
         const nmap=S.groupMembers[m.target_id]||{};
-        g.last_from = (m.from_uid===S.self.uid) ? '我' : (nmap[m.from_uid] || ('#'+m.from_uid));
+        g.last_from = mine ? '我' : (nmap[m.from_uid] || ('#'+m.from_uid));
         g.last_from_uid = m.from_uid;
         g.last_time=m.time;
       }
       bumpConversation('group',m.target_id);   // 置顶该群
-      renderList();                            // 刷新排序
+      scheduleRenderList();                    // 合并刷新排序
     }
   } else if(t==='friend'){
     if(p.action==='request'){

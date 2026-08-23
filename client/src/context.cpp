@@ -172,6 +172,13 @@ std::vector<Message> ClientContext::getMessage(int id) {
   return it->second;
 }
 
+std::vector<Message> ClientContext::getMessagesFrom(int id,size_t from) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = msgs_.find(id);
+  if(it == msgs_.end() || from >= it->second.size()) return {};
+  return std::vector<Message>(it->second.begin() + from,it->second.end());
+}
+
 void ClientContext::setMessage(int id,const std::vector<Message>& msgs) {
   std::lock_guard<std::mutex> lock(mtx_);
   msgs_[id] = msgs;

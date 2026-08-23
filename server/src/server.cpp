@@ -67,6 +67,7 @@ MessageManager messageManager;
 GroupManager groupManager;
 UidGenerator get_uid;
 FileManager fileManager;
+MessageWrite msgWrite(&db);
 
 static int createDataListener(unsigned short& out_port) {
   int fd = socket(AF_INET,SOCK_STREAM,0);
@@ -121,7 +122,8 @@ static void notifyFileMessage(const std::string& file_id) {
   } else {
     msg.status = 1;
   }
-  messageManager.add(msg);
+  // messageManager.add(msg);
+  msgWrite.push(msg);
   if(meta.chat_type == "private") {
     if(sessionManager.isOnline(meta.target_id)) sessionManager.sendChatTo(meta.target_id,msg);
     if(sessionManager.isOnline(meta.uploader_uid)) sessionManager.sendChatTo(meta.uploader_uid,msg);
@@ -152,7 +154,8 @@ void startUpload(EventLoop* loop,int fd,const std::string& file_id,uint64_t offs
       }
     }
   });
-  fcon->setCloseCallback([weak,loop,fd] {
+  fcon->setCloseCallback([seion,weak,loop,fd] {
+    fileManager.updateFileReceived(seion->file_id,seion->offset);
     loop->queueInLoop([weak,fd] {
       std::lock_guard<std::mutex> lock(upload_mtx);
       upload_sessions.erase(fd);
@@ -329,7 +332,7 @@ void Session::handleUserAction(const nlohmann::json& j) {
       if(j["action"] == "logout") {
         usrManager.updateLastLogout(linked_usr_.uid,now_ms());
         friendOffPush();
-        sessionManager.unbindUser(linked_usr_.uid);
+        sessionManager.unbindUser(linked_usr_.uid,conn_);
         nlohmann::json reply;
         returnReply(j,0,reply);
         authed_ = false;
@@ -354,7 +357,7 @@ void Session::handleUserAction(const nlohmann::json& j) {
         std::vector<int> disbanded;
         groupManager.removeUser(del_uid,&disbanded);
         for(int gid : disbanded) messageManager.removeGroupMessages(gid);
-        sessionManager.unbindUser(del_uid);
+        sessionManager.unbindUser(del_uid,conn_);
         returnReply(j,0,reply);
         authed_ = false;
         // conn_->handleClose();
@@ -505,17 +508,15 @@ void Session::chatServer(nlohmann::json j) {
     }
     msg.message_id = messageManager.getMsgId();
     msg.time = now_ms();
-    if(messageManager.add(msg) != 0) {
-      nlohmann::json reply;
-      reply["error"] = "save failed";
-      returnReply(j,-1,reply);
-      return;
-    }
+    msgWrite.push(msg);
     if(sessionManager.isOnline(msg.target_id)) {
       sessionManager.sendChatTo(msg.target_id,msg);
       msg.status = 1;
     } else {
       msg.status = 0;
+    }
+    if(sessionManager.isOnline(msg.from_uid)) {
+      sessionManager.sendChatTo(msg.from_uid,msg);
     }
     nlohmann::json reply;
     reply["data"] = msg;
@@ -539,15 +540,10 @@ void Session::chatServer(nlohmann::json j) {
       returnReply(j,-1,reply);  // 非成员
       return;
     }
-    if(messageManager.add(msg) != 0) {
-      nlohmann::json reply;
-      reply["error"] = "save failed";
-      returnReply(j,-1,reply);
-      return;
-    }
+    msgWrite.push(msg);
     auto members = groupManager.getMembers(gid);
     for(auto& m : members) {
-      if (m.uid == self_uid) continue; // 不发给自己
+      // if (m.uid == self_uid) continue; // 不发给自己
       if(sessionManager.isOnline(m.uid)) {
         sessionManager.sendChatTo(m.uid,msg);
       }
@@ -1122,6 +1118,20 @@ void Session::onMessage(const std::string& frame) {
       std::string action = j.value("action",std::string());
       if(action == "register" || action == "login") {
         if(handleAuth(j)) {
+          if(auto old = sessionManager.getConn(linked_usr_.uid)) {
+            if(old != conn_) {
+              nlohmann::json kick;
+              kick["msg_type"] = "push";
+              kick["type"] = "system";
+              kick["action"] = "kicked";
+              kick["data"] = {{"reason","该账号已在其他设备登录"}};
+              auto loop = old->loop();
+              loop->runInLoop([old,kick] {
+                old->send(kick.dump());
+                old->handleClose();
+              });
+            }
+          }
           sessionManager.bindUser(linked_usr_.uid,conn_);
           friendOnPush();
         }
@@ -1162,9 +1172,11 @@ void Session::onMessage(const std::string& frame) {
 
 void Session::onClose() {
   if(authed_) {
-    usrManager.updateLastLogout(linked_usr_.uid,conn_->lastActive());
-    friendOffPush();
-    sessionManager.unbindUser(linked_usr_.uid);
+    if(sessionManager.isBoundTo(linked_usr_.uid, conn_)) {
+      usrManager.updateLastLogout(linked_usr_.uid,conn_->lastActive());
+      friendOffPush();
+      sessionManager.unbindUser(linked_usr_.uid,conn_);
+    }
     linked_usr_.uid = 0;
     linked_usr_.username = "";
     authed_ = false;
@@ -1192,6 +1204,7 @@ int start_server(unsigned short port) {
   messageManager.setDb(&db);
   fileManager.setDb(&db);
   fileManager.init();
+  msgWrite.start();
   int max_uid = usrManager.getMaxUid();
   get_uid.init(max_uid + 1);
 
@@ -1234,5 +1247,6 @@ int start_server(unsigned short port) {
 
   LOG(INFO) << "server start listening on port " << port;
   main_loop.loop();
+  msgWrite.stop();
   return 0;
 }

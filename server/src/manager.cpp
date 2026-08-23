@@ -414,23 +414,24 @@ void FriendManager::loadBlocks() {
 }
 
 // 消息管理相关
-int MessageManager::add(const Message& msg) {
-  if(!db_) return -1;
-  std::string sql = 
-    "INSERT INTO messages (message_id,type,chat_type,from_uid,target_id,content,msg_time,status) VALUES ('"
-    + db_->escape(msg.message_id) + "','"
-    + db_->escape(msg.type) + "','"
-    + db_->escape(msg.chat_type) + "',"
-    + std::to_string(msg.from_uid) + ","
-    + std::to_string(msg.target_id) + ",'"
-    + db_->escape(msg.content) + "',"
-    + std::to_string(msg.time) + ","
-    + std::to_string(msg.status) + ")";
-  if(db_->execute(sql)) {
-    return 0;
-  }
-  return -1;
-}
+// int MessageManager::add(const Message& msg) {
+//   if(!db_) return -1;
+//   std::string sql = 
+//     "INSERT INTO messages (message_id,type,chat_type,from_uid,target_id,content,msg_time,status) VALUES ('"
+//     + db_->escape(msg.message_id) + "','"
+//     + db_->escape(msg.type) + "','"
+//     + db_->escape(msg.chat_type) + "',"
+//     + std::to_string(msg.from_uid) + ","
+//     + std::to_string(msg.target_id) + ",'"
+//     + db_->escape(msg.content) + "',"
+//     + std::to_string(msg.time) + ","
+//     + std::to_string(msg.status) + ")";
+//   if(db_->execute(sql)) {
+//     return 0;
+//   }
+//   return -1;
+//   // return 0;
+// }
 
 std::vector<Message> MessageManager::getMessagesByTime(int uid,uint64_t time) {
   return queryMessages(uid,time);
@@ -605,6 +606,7 @@ int GroupManager::kickMember(int group_id,int handler_uid,int target_id) {
   int target_per = mem[target_id].permission;
   if(hand_per == 2) return -2; // 普通成员无权限
   if(hand_per == 1 && (target_per == 0 || target_per == 1)) return -3; // 管理员无权踢群主或其他管理员
+  if(handler_uid == target_id) return -4; // 不能踢自己
   if(db_) {
     db_->begin();
     if(!deleteGroupMember(group_id,target_id)) {
@@ -647,6 +649,7 @@ int GroupManager::removeUser(int uid,std::vector<int>* disbanded) {
 int GroupManager::setAdmin(int group_id,int handler_uid,int target_id,bool admin) {
   std::lock_guard<std::mutex> lock(mtx_);
   auto& mem = members_[group_id];
+  if(handler_uid == target_id) return -3; // 不能把自己设置为管理员
   if(!mem.count(handler_uid) || mem[handler_uid].permission != 0) return -1; // 仅群主有权限
   if(!mem.count(target_id)) return -2;
   if(admin) {
@@ -877,9 +880,18 @@ void SessionManager::bindUser(int user_id,std::shared_ptr<Connection> conn) {
   user_to_conn_[user_id] = std::move(conn);
 }
 
-void SessionManager::unbindUser(int user_id) {
+void SessionManager::unbindUser(int user_id,const std::shared_ptr<Connection>& conn) {
   std::lock_guard<std::mutex> lock(mtx_);
-  user_to_conn_.erase(user_id);
+  auto it = user_to_conn_.find(user_id);
+  if(it != user_to_conn_.end() && it->second == conn) {
+    user_to_conn_.erase(it);
+  }
+}
+
+bool SessionManager::isBoundTo(int uid,const std::shared_ptr<Connection>& conn) {
+  std::lock_guard lock(mtx_);
+  auto it = user_to_conn_.find(uid);
+  return it != user_to_conn_.end() && it->second == conn;
 }
 
 bool SessionManager::isOnline(int uid) {
@@ -1050,7 +1062,6 @@ bool FileManager::writePart(const std::string& file_id,uint64_t offset,const cha
   }
   close(fd);
   it->second.received = offset + len;
-  updateFileReceived(file_id,it->second.received);
   return true;
 }
 
@@ -1196,5 +1207,63 @@ void FileManager::cleanupOrphans() {
     } else {
       it++;
     }
+  }
+}
+
+// 消息入库优化
+void MessageWrite::start() {
+  thread_ = std::thread([this] { loop(); });
+}
+
+void MessageWrite::stop() {
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    stop_ = true;
+  }
+  cv_.notify_all();
+  if(thread_.joinable()) thread_.join();
+}
+
+void MessageWrite::push(const Message& msg) {
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    queue_.push_back(msg);
+  }
+  cv_.notify_one();
+}
+
+void MessageWrite::loop() {
+  while(true) {
+    std::deque<Message> msgs;
+    {
+      std::unique_lock<std::mutex> lock(mtx_);
+      cv_.wait_for(lock,std::chrono::milliseconds(100),[&] { return stop_ || !queue_.empty(); });
+      msgs.swap(queue_);
+      if(stop_ && msgs.empty()) break;
+    }
+    down(msgs);
+  }
+}
+
+void MessageWrite::down(std::deque<Message>& msgs) {
+  if(msgs.empty()) return;
+  std::string sql = 
+    "INSERT INTO messages (message_id,type,chat_type,from_uid,target_id,content,msg_time,status) VALUES ";
+  bool first = true;
+  for(auto& m : msgs) {
+    if(!first) sql += ",";
+    first = false;
+    sql += "('"
+      + db_->escape(m.message_id) + "','"
+      + db_->escape(m.type) + "','"
+      + db_->escape(m.chat_type) + "',"
+      + std::to_string(m.from_uid) + ","
+      + std::to_string(m.target_id) + ",'"
+      + db_->escape(m.content) + "',"
+      + std::to_string(m.time) + ","
+      + std::to_string(m.status) + ")";
+  }
+  if(!db_->execute(sql)) {
+    LOG(ERROR) << "消息批量写消息失败，丢失 " << msgs.size() << " 条";
   }
 }

@@ -14,6 +14,8 @@
 #include <optional>
 #include <unordered_set>
 #include <memory>
+#include <condition_variable>
+#include <deque>
 
 class UidGenerator {
 public:
@@ -97,7 +99,7 @@ private:
 class MessageManager {
 public:
   void setDb(Database* db) { db_ = db; }
-  int add(const Message& msg);
+  // int add(const Message& msg);
 
   std::vector<Message> getMessagesByTime(int uid,uint64_t time); //获取某个时间后的所有消息，可用于离线消息的同步
   std::vector<Message> getAllMsg(int uid); //获取所有消息
@@ -189,11 +191,12 @@ public:
   uint64_t getPartSize(const std::string& file_id); // 当前已接收字节（续传相关）
   bool finishUpload(const std::string& file_id); // 将 .uploading 正式存入, status=1
   bool removePart(const std::string& file_id); // 失败/放弃时清理
+  // bool removeUser();
+  bool updateFileReceived(const std::string& file_id,uint64_t received);
 
 private:
   bool insertFileMeta(const FileMeta& m);
   bool updateFileMetaDb(const FileMeta& m);
-  bool updateFileReceived(const std::string& file_id,uint64_t received);
   bool updateFileStatus(const std::string& file_id,int status);
   bool deleteFileMetaDb(const std::string& file_id);
   bool loadMeta();
@@ -208,12 +211,34 @@ private:
   Database* db_ = nullptr;
 };
 
+// 服务端消息入库，磁盘IO瓶颈优化
+class MessageWrite {
+public:
+  MessageWrite(Database* db) : db_(db) {}
+  ~MessageWrite() { stop(); }
+  void start();
+  void stop();
+  void push(const Message& msg);
+
+private:
+  void loop();
+  void down(std::deque<Message>& msgs);
+
+private:
+  Database* db_;
+  std::thread thread_;
+  std::mutex mtx_;
+  std::condition_variable cv_;
+  std::deque<Message> queue_;
+  bool stop_ = false;
+};
+
 class SessionManager {
 public:
   void bindUser(int user_id,std::shared_ptr<Connection> conn);
-  void unbindUser(int user_id);
+  void unbindUser(int user_id,const std::shared_ptr<Connection>& conn);
   std::shared_ptr<Connection> getConn(int uid);
-
+  bool isBoundTo(int uid,const std::shared_ptr<Connection>& conn);
   bool isOnline(int uid);
 
   bool sendChatTo(int uid,const Message& msg);

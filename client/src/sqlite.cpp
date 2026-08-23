@@ -14,6 +14,8 @@ bool LocalDb::init(const std::string& path) {
     }
     return false;
   }
+  sqlite3_exec(db_,"PRAGMA journal_mode=WAL;",nullptr,nullptr,nullptr);
+  sqlite3_exec(db_,"PRAGMA synchronous=NORMAL;",nullptr,nullptr,nullptr);
   const char* sql =
     "CREATE TABLE IF NOT EXISTS messages ("
     " message_id TEXT PRIMARY KEY,"

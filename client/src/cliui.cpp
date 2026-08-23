@@ -266,7 +266,7 @@ void CliUI::chatLoop(int peerId,bool isGroup) {
 
     int rc;
     if(isGroup) rc = chatService_.sendGroupMessage(peerId,line);
-    else        rc = chatService_.sendPrivateMessage(peerId,line);
+    else rc = chatService_.sendPrivateMessage(peerId,line);
     if(rc != 0) {
       std::cout << "发送失败\n";
     } else {
@@ -278,10 +278,9 @@ void CliUI::chatLoop(int peerId,bool isGroup) {
 }
 
 void CliUI::printNewMessages(int peerId) {
-  auto msgs = ctx_.getMessage(peerId);
-  while(chatPrinted_ < msgs.size()) {
-    printMessage(msgs[chatPrinted_++]);
-  }
+  auto msgs = ctx_.getMessagesFrom(peerId,chatPrinted_);
+  for(auto& m : msgs) printMessage(m);
+  chatPrinted_ += msgs.size();
 }
 
 void CliUI::printMessage(const Message& msg) {

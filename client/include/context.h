@@ -45,6 +45,7 @@ public:
   void addMessage(Message& msg);
   void markRead(int uid);
   std::vector<Message> getMessage(int id);
+  std::vector<Message> getMessagesFrom(int id,size_t from);
   void setMessage(int uid,const std::vector<Message>& msgs);
   void updateLastSyncTime(uint64_t t);
   uint64_t getLastSyncTime();

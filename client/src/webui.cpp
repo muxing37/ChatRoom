@@ -79,12 +79,20 @@ WebUI::~WebUI() {
 }
 
 void WebUI::stop() {
+  {
+    std::lock_guard<std::mutex> lock(conn_mutex_);
+    for(auto* ws : connections_) {
+      try { ws->close(); } catch(...) {}
+    }
+  }
   svr_.stop();
 }
 
 bool isPortAvailable(const char* host,int port) {
   int sock = socket(AF_INET,SOCK_STREAM,0);
   if(sock < 0) return false;
+  int opt = 1;
+  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
@@ -114,6 +122,7 @@ void WebUI::run(const char* host) {
     if(req.path == "/api/ping") return;
     logLine(req.method + " " + req.path + " -> " + std::to_string(res.status));
   });
+  svr_.set_idle_interval(0,100000);
   svr_.listen(host, port);
 }
 
@@ -215,59 +224,52 @@ void WebUI::setupRoutes() {
       return;
     }
     json arr = json::array();
-    auto lastMsgOf = [&](int peer)->nlohmann::json {
-      nlohmann::json out = {{"time",(uint64_t)0},{"preview",""},{"from",""}};
-      std::optional<Message> best;
-      for(auto& m : ctx_.getMessage(peer)) {
-        if(!best || m.time > best->time) best = m;
+    auto infoFromVec = [&](const std::vector<Message>& msgs)->nlohmann::json {
+      nlohmann::json out = {{"time",(uint64_t)0},{"preview",""},{"from",""},{"unread",0}};
+      const Message* best = nullptr;
+      int unread = 0;
+      for(auto& m : msgs) {
+        if(m.status == 0) unread++;
+        if(!best || m.time > best->time) best = &m;
       }
-      if(best) {
-        out["time"] = best->time;
-        if(best->type == "file") {
-          std::string nm;
-          try {
-            nm = json::parse(best->content).value("file_name",std::string());
-          } catch(...) {}
-          bool img = false;
-          std::string ext;
-          auto dot = nm.find_last_of('.');
-          if(dot != std::string::npos) {
-            ext = nm.substr(dot+1);
-            for(auto& c : ext) c = (char)tolower((unsigned char)c);
-            img = (ext=="png"||ext=="jpg"||ext=="jpeg"||ext=="gif"||ext=="webp"||ext=="bmp"||ext=="svg");
-          }
-          out["preview"] = img ? "[图片]" : "[文件]";
-        } else {
-          out["preview"] = best->content;
+      out["unread"] = unread;
+      if(!best) return out;
+      out["time"] = best->time;
+      if(best->type == "file") {
+        std::string nm;
+        try { nm = json::parse(best->content).value("file_name",std::string()); } catch(...) {}
+        bool img = false;
+        auto dot = nm.find_last_of('.');
+        if(dot != std::string::npos) {
+          std::string ext = nm.substr(dot+1);
+          for(auto& c : ext) c = (char)tolower((unsigned char)c);
+          img = (ext=="png"||ext=="jpg"||ext=="jpeg"||ext=="gif"||ext=="webp"||ext=="bmp"||ext=="svg");
         }
-        if(best->from_uid == ctx_.getSelf().uid) out["from"] = "我";
-        else {
-          auto u = ctx_.getFriendList();
-          for(auto& f : u) if(f.uid == best->from_uid){ out["from"] = f.username; break; }
-        }
+        out["preview"] = img ? "[图片]" : "[文件]";
+      } else {
+        out["preview"] = best->content;
+      }
+      if(best->from_uid == ctx_.getSelf().uid) out["from"] = "我";
+      else {
+        auto u = ctx_.getFriend(best->from_uid);
+        if(u) out["from"] = u->username;
       }
       return out;
     };
-    auto unreadCntOf = [&](int uid)->int {
-      int cnt = 0;
-      for(auto& m : ctx_.getMessage(uid)) {
-        if(m.status == 0) cnt++;
-      }
-      return cnt;
-    };
-    for(auto& u : ctx_.getFriendList()) {
-      auto lm = lastMsgOf(u.uid);
-      arr.push_back({{"uid",u.uid},{"username",u.username},{"online",u.online},{"last_time",lm["time"]},{"last_msg",lm["preview"]},{"last_from",lm["from"]},{"history",false},{"unread",unreadCntOf(u.uid)}});
+    auto friends = ctx_.getFriendList();
+    for(auto& u : friends) {
+      auto lm = infoFromVec(ctx_.getMessage(u.uid));
+      arr.push_back({{"uid",u.uid},{"username",u.username},{"online",u.online},{"last_time",lm["time"]},{"last_msg",lm["preview"]},{"last_from",lm["from"]},{"history",false},{"unread",lm["unread"]}});
     }
     {
       std::unordered_set<int> fset;
-      for(auto& u : ctx_.getFriendList()) fset.insert(u.uid);
+      for(auto& u : friends) fset.insert(u.uid);
       int myself = ctx_.getSelf().uid;
       for(auto& [id, msgs] : ctx_.getAllMessages()) {
         if(msgs.empty() || msgs.front().chat_type != "private") continue;
         if(id == myself || fset.count(id)) continue;
-        auto lm = lastMsgOf(id);
-        arr.push_back({{"uid",id},{"username",""},{"online",false},{"last_time",lm["time"]},{"last_msg",lm["preview"]},{"last_from",lm["from"]},{"history",true},{"unread",unreadCntOf(id)}});
+        auto lm = infoFromVec(msgs);
+        arr.push_back({{"uid",id},{"username",""},{"online",false},{"last_time",lm["time"]},{"last_msg",lm["preview"]},{"last_from",lm["from"]},{"history",true},{"unread",lm["unread"]}});
       }
     }
     res.set_content(json{{"status",0},{"friends",arr}}.dump(),"application/json");
@@ -449,61 +451,55 @@ void WebUI::setupRoutes() {
       return;
     }
     json arr = json::array();
-    // 取该群最后一条消息
-    auto lastMsgOf = [&](int gid)->nlohmann::json {
-      nlohmann::json out = {{"time",(uint64_t)0},{"preview",""},{"from",""},{"uid",0}};
-      std::optional<Message> best;
-      for(auto& m : ctx_.getMessage(gid)) {
-        if(!best || m.time > best->time) best = m;
+    auto infoFromVec = [&](int gid, const std::vector<Message>& msgs)->nlohmann::json {
+      nlohmann::json out = {{"time",(uint64_t)0},{"preview",""},{"from",""},{"uid",0},{"unread",0}};
+      const Message* best = nullptr;
+      int unread = 0;
+      for(auto& m : msgs) {
+        if(m.status == 0) unread++;
+        if(!best || m.time > best->time) best = &m;
       }
-      if(best) {
-        out["time"] = best->time;
-        if(best->type == "file") {
-          std::string nm;
-          try { nm = json::parse(best->content).value("file_name",std::string()); } catch(...) {}
-          bool img = false;
-          auto dot = nm.find_last_of('.');
-          if(dot != std::string::npos) {
-            std::string ext = nm.substr(dot+1);
-            for(auto& c : ext) c = (char)tolower((unsigned char)c);
-            img = (ext=="png"||ext=="jpg"||ext=="jpeg"||ext=="gif"||ext=="webp"||ext=="bmp"||ext=="svg");
-          }
-          out["preview"] = img ? "[图片]" : "[文件]";
-        } else {
-          out["preview"] = best->content;
+      out["unread"] = unread;
+      if(!best) return out;
+      out["time"] = best->time;
+      if(best->type == "file") {
+        std::string nm;
+        try { nm = json::parse(best->content).value("file_name",std::string()); } catch(...) {}
+        bool img = false;
+        auto dot = nm.find_last_of('.');
+        if(dot != std::string::npos) {
+          std::string ext = nm.substr(dot+1);
+          for(auto& c : ext) c = (char)tolower((unsigned char)c);
+          img = (ext=="png"||ext=="jpg"||ext=="jpeg"||ext=="gif"||ext=="webp"||ext=="bmp"||ext=="svg");
         }
-        out["uid"] = best->from_uid;
-        if(best->from_uid == ctx_.getSelf().uid) out["from"] = "我";
-        else {
-          if(ctx_.getGroupAllMembers(gid).empty()) {
-            group_.listMembers(gid);
-          }
-          for(auto& m : ctx_.getGroupAllMembers(gid)) {
-            if(m.uid == best->from_uid){ out["from"] = m.usr_name; break; }
-          }
+        out["preview"] = img ? "[图片]" : "[文件]";
+      } else {
+        out["preview"] = best->content;
+      }
+      out["uid"] = best->from_uid;
+      if(best->from_uid == ctx_.getSelf().uid) out["from"] = "我";
+      else {
+        if(ctx_.getGroupAllMembers(gid).empty()) {
+          group_.listMembers(gid);
         }
+        auto m = ctx_.getGroupMember(gid, best->from_uid);
+        out["from"] = m ? m->usr_name : ("#"+std::to_string(best->from_uid));
       }
       return out;
     };
-    auto unreadCntOf = [&](int gid)->int {
-      int cnt = 0;
-      for(auto& m : ctx_.getMessage(gid)) {
-        if(m.status == 0) cnt++;
-      }
-      return cnt;
-    };
-    for(auto& g : ctx_.getGroupList()) {
-      auto lm = lastMsgOf(g.group_id);
-      arr.push_back({{"group_id",g.group_id},{"name",g.name},{"owner_uid",g.owner_uid},{"last_time",lm["time"]},{"last_msg",lm["preview"]},{"last_from",lm["from"]},{"last_from_uid",lm["uid"]},{"history",false},{"unread",unreadCntOf(g.group_id)}});
+    auto groups = ctx_.getGroupList();
+    for(auto& g : groups) {
+      auto lm = infoFromVec(g.group_id, ctx_.getMessage(g.group_id));
+      arr.push_back({{"group_id",g.group_id},{"name",g.name},{"owner_uid",g.owner_uid},{"last_time",lm["time"]},{"last_msg",lm["preview"]},{"last_from",lm["from"]},{"last_from_uid",lm["uid"]},{"history",false},{"unread",lm["unread"]}});
     }
     {
       std::unordered_set<int> gset;
-      for(auto& g : ctx_.getGroupList()) gset.insert(g.group_id);
+      for(auto& g : groups) gset.insert(g.group_id);
       for(auto& [id, msgs] : ctx_.getAllMessages()) {
         if(msgs.empty() || msgs.front().chat_type != "group") continue;
         if(gset.count(id)) continue;
-        auto lm = lastMsgOf(id);
-        arr.push_back({{"group_id",id},{"name",""},{"owner_uid",0},{"last_time",lm["time"]},{"last_msg",lm["preview"]},{"last_from",lm["from"]},{"last_from_uid",lm["uid"]},{"history",true},{"unread",unreadCntOf(id)}});
+        auto lm = infoFromVec(id, msgs);
+        arr.push_back({{"group_id",id},{"name",""},{"owner_uid",0},{"last_time",lm["time"]},{"last_msg",lm["preview"]},{"last_from",lm["from"]},{"last_from_uid",lm["uid"]},{"history",true},{"unread",lm["unread"]}});
       }
     }
     res.set_content(json{{"status",0},{"groups",arr}}.dump(),"application/json");

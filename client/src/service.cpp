@@ -36,7 +36,20 @@ bool ClientNetwork::send(const json& j) {
   }
 }
 
-nlohmann::json ClientNetwork::request(json j) {
+bool ClientNetwork::requestWithoutWait(json& j,std::function<void(const json& reply)> cb) {
+  auto id = generateRequestId();
+  j["msg_type"] = "request";
+  j["request_id"] = id;
+  j["time"] = now_ms();
+  if(!send(j)) return false;
+  {
+    std::lock_guard<std::mutex> lock(asyncMtx_);
+    abs_[id] = std::move(cb);
+  }
+  return true;
+}
+
+nlohmann::json ClientNetwork::request(json& j) {
   auto id = generateRequestId();
   j["msg_type"] = "request";
   j["request_id"] = id;
@@ -107,6 +120,21 @@ void ClientNetwork::dispatch(const json& j) {
 
 void ClientNetwork::pushReply(const json& j) {
   auto id = j["request_id"].get<std::string>();
+  std::function<void(const json& reply)> cb;
+  {
+    std::lock_guard<std::mutex> lock(asyncMtx_);
+    auto it = abs_.find(id);
+    if(it != abs_.end()) {
+      cb = std::move(it->second);
+      abs_.erase(it);
+    }
+  }
+  if(cb) {
+    try {
+      cb(j);
+    } catch(...) {}
+    return;
+  }
   {
     std::lock_guard lock(replyMutex_);
     replies_[id]=j;
@@ -354,21 +382,17 @@ int ChatService::sendPrivateMessage(int to_uid,const std::string& text) {
     {"time",0},
     {"status",0}
   };
-  auto reply = network_.request(j);
-  if(reply["status"] != 0) {
+  if(!network_.requestWithoutWait(j,[this](const nlohmann::json& reply) {
+      if(reply["status"] != 0) return;
+      try {
+        Message msg = reply["data"].get<Message>();
+        if(ctx_.isMessageRepeat(msg.message_id)) return;
+        ctx_.addMessage(msg);
+        ctx_.markMessageReceived(msg.message_id);
+      } catch(...) {}
+    })) {
     return -1;
   }
-  auto data = reply["data"];
-  Message msg;
-  msg.message_id = data["message_id"];
-  msg.type = data["type"];
-  msg.chat_type = data["chat_type"];
-  msg.from_uid = ctx_.getSelf().uid;
-  msg.target_id = to_uid;
-  msg.content = text;
-  msg.time = data["time"];
-  ctx_.addMessage(msg);
-  ctx_.markMessageReceived(msg.message_id);
   return 0;
 }
 
@@ -386,11 +410,17 @@ int ChatService::sendGroupMessage(int gid,const std::string& text) {
     {"time",0},
     {"status",0},
   };
-  nlohmann::json reply = network_.request(j);
-  if(reply["status"] != 0) return reply["status"];
-  Message msg = reply["data"].get<Message>();
-  ctx_.addMessage(msg);
-  ctx_.markMessageReceived(msg.message_id);
+  if(!network_.requestWithoutWait(j,[this](const nlohmann::json& reply) {
+      if(reply["status"] != 0) return;
+      try {
+        Message msg = reply["data"].get<Message>();
+        if(ctx_.isMessageRepeat(msg.message_id)) return;
+        ctx_.addMessage(msg);
+        ctx_.markMessageReceived(msg.message_id);
+      } catch(...) {}
+    })) {
+    return -1;
+  }
   return 0;
 }
 

@@ -5,7 +5,7 @@
 #include <nlohmann/json.hpp>
 #include <chrono>
 
-constexpr int64_t MAX_FILE_SIZE = 4LL * 1024 * 1024 * 1024; // 单文件大小上限（QQ 4GB,微信 1GB）
+constexpr int64_t MAX_FILE_SIZE = 30LL * 1024 * 1024 * 1024; // 单文件大小上限（QQ 4GB,微信 1GB）
 
 struct User {
     int uid = 0;
