@@ -77,6 +77,7 @@ public:
 private:
   bool insertFriend(int a,int b);
   bool deleteFriendPair(int a,int b);
+  bool deleteFriendMessages(int a,int b); // 删除双方私聊消息
   bool insertFriendRequest(int from,int to);
   bool deleteFriendRequest(int a,int b);
   bool insertBlock(int uid,int target);

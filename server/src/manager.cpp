@@ -146,6 +146,9 @@ bool UsrManager::deleteUser(int uid) {
 void UsrManager::updateLastLogout(int uid,uint64_t t) {
   if(!db_) return;
   db_->execute("UPDATE users SET last_logout_time=" + std::to_string(t) + " WHERE uid=" + std::to_string(uid));
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = uid_map_.find(uid);
+  if(it != uid_map_.end()) it->second.last_logout_time = t;
 }
 
 std::vector<Account> UsrManager::selectAllUsers() {
@@ -198,6 +201,7 @@ std::vector<int> FriendManager::list_request(int uid) {
 int FriendManager::del(int uid1,int uid2) {
   std::lock_guard<std::mutex> lock(mtx_);
   if(!deleteFriendPair(uid1,uid2)) return -1;
+  deleteFriendMessages(uid1,uid2); // 删除双方私聊消息
   auto it1 = friends_.find(uid1);
   if(it1 != friends_.end()) it1->second.erase(uid2);
   auto it2 = friends_.find(uid2);
@@ -344,6 +348,13 @@ bool FriendManager::deleteFriendPair(int a,int b) {
     " AND uid2=" + std::to_string(a) + ")");
 }
 
+bool FriendManager::deleteFriendMessages(int a,int b) {
+  if(!db_) return false;
+  return db_->execute("DELETE FROM messages WHERE chat_type='private' AND ((from_uid=" + std::to_string(a) +
+    " AND target_id=" + std::to_string(b) + ") OR (from_uid=" + std::to_string(b) +
+    " AND target_id=" + std::to_string(a) + "))");
+}
+
 bool FriendManager::insertFriendRequest(int from,int to) {
   if(!db_) return false;
   return db_->execute("INSERT INTO friend_requests (from_uid,to_uid,apply_time) VALUES (" +
@@ -412,26 +423,6 @@ void FriendManager::loadBlocks() {
   }
   mysql_free_result(res);
 }
-
-// 消息管理相关
-// int MessageManager::add(const Message& msg) {
-//   if(!db_) return -1;
-//   std::string sql = 
-//     "INSERT INTO messages (message_id,type,chat_type,from_uid,target_id,content,msg_time,status) VALUES ('"
-//     + db_->escape(msg.message_id) + "','"
-//     + db_->escape(msg.type) + "','"
-//     + db_->escape(msg.chat_type) + "',"
-//     + std::to_string(msg.from_uid) + ","
-//     + std::to_string(msg.target_id) + ",'"
-//     + db_->escape(msg.content) + "',"
-//     + std::to_string(msg.time) + ","
-//     + std::to_string(msg.status) + ")";
-//   if(db_->execute(sql)) {
-//     return 0;
-//   }
-//   return -1;
-//   // return 0;
-// }
 
 std::vector<Message> MessageManager::getMessagesByTime(int uid,uint64_t time) {
   return queryMessages(uid,time);
