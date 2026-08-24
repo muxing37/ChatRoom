@@ -1766,9 +1766,10 @@ function uploadFileBlob(file){
   debounceStick();
   S.uploading=true;   // 标记上传进行中（互斥 + file_progress 归属判断）
   const xhr=new XMLHttpRequest();
-  const fd=new FormData();
-  fd.append('file',file);
-  xhr.open('POST','/api/file/upload?chat_type='+encodeURIComponent(a.kind)+'&target_id='+a.id);
+  // 直接发送 File 原始字节（octet-stream）：浏览器流式读取文件、不把整个文件载入 JS 内存，
+  // 客户端也流式写入临时文件，避免大文件 OOM
+  xhr.open('POST','/api/file/upload?chat_type='+encodeURIComponent(a.kind)+'&target_id='+a.id+'&filename='+encodeURIComponent(name));
+  xhr.setRequestHeader('Content-Type','application/octet-stream');
   // 阶段1：浏览器→客户端（占整体 0-30%）
   // 浏览器→本地临时目录：不显示进度（用户只关心客户端→服务端的上传进度）
   xhr.upload.onprogress=function(){};
@@ -1782,12 +1783,12 @@ function uploadFileBlob(file){
     } else {
       S.uploading=false;
       removeLocalUp();
-      const errMap={'-2':'参数错误','-3':'文件超过 2GB 上限','-4':'服务端拒绝','-5':'数据连接失败','-6':'传输中断'};
+      const errMap={'-2':'参数错误','-3':'文件超过大小上限','-4':'服务端拒绝','-5':'数据连接失败','-6':'传输中断'};
       toast('上传失败：'+(errMap[ret]||'请查看客户端控制台'),'err');
     }
   };
   xhr.onerror=function(){ S.uploading=false; removeLocalUp(); toast('上传失败：网络错误','err'); };
-  xhr.send(fd);
+  xhr.send(file);
 }
 // 本地乐观上传气泡（上传中显示，仅自己可见，不算发送；完成后由服务端真实消息替换）
 function renderLocalUpload(m){

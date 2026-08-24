@@ -4,8 +4,23 @@
 #include <cstdlib>
 #include <ctime>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <termios.h>
 
 using json = nlohmann::json;
+
+namespace {
+  std::string sendErrorText(const json& reply) {
+    std::string e = reply.value("error", std::string());
+    if(e == "blocked by receiver") return "对方已将你屏蔽";
+    if(e == "not friends") return "对方不是你的好友";
+    if(e == "not member") return "你不在该群";
+    if(e == "fake request") return "非法请求";
+    if(e == "timeout") return "发送超时";
+    if(e == "disconnected") return "连接已断开";
+    return e.empty() ? "未知错误" : e;
+  }
+}
 
 CliUI::CliUI(
   AuthService& authService,
@@ -20,11 +35,13 @@ CliUI::CliUI(
   chatService_(chatService),
   groupService_(groupService),
   fileService_(fileService),
-  ctx_(ctx) {}
-
-void CliUI::notifyPush() {
-  pushSeq_++;
+  ctx_(ctx) {
+  chatService_.setSendResultHandler([this](const json& reply,const std::string&,int){
+    handleUiPush(json{{"type","send_result"},{"status",reply.value("status",-1)},{"error",reply.value("error","")}});
+  });
 }
+
+CliUI::~CliUI() {}
 
 bool CliUI::run() {
   while(running_) {
@@ -51,12 +68,12 @@ bool CliUI::loginMenu() {
       running_ = false;
       return false;
     }
-    std::string username = inputString("用户名:");
+    std::string username = readLine("用户名:");
     if(username.size() == 0) {
       std::cout << "用户名不能为空" << std::endl;
       continue;
     }
-    std::string password = inputString("密码:");
+    std::string password = inputPassword("密码:");
     if(password.size() == 0) {
       std::cout << "密码不能为空" << std::endl;
       continue;
@@ -68,7 +85,7 @@ bool CliUI::loginMenu() {
       ok = authService_.regis(username,password);
     }
     if(ok) {
-      std::cout << "登录成功！欢迎 " << username << "\n";
+      std::cout << "登录成功！欢迎 " << username << " # " << ctx_.getSelf().uid << "\n";
       return true;
     }
     std::cout << "登录/注册失败，请重试\n";
@@ -83,13 +100,51 @@ void CliUI::init() {
   groupService_.syncJoinRequests();
   friendService_.getBlockList();
   std::cout << "同步完成\n";
+  showOfflineMessages();
+}
+
+void CliUI::showOfflineMessages() {
+  uint64_t logout = ctx_.getLastLogoutTime();
+  int self_uid = ctx_.getSelf().uid;
+  struct Item {
+    int id;
+    bool isGroup;
+    int count;
+  };
+  std::vector<Item> items;
+  int total = 0;
+  auto all = ctx_.getAllMessages();
+  for(auto& [id, msgs] : all) {
+    if(msgs.empty()) continue;
+    bool isGroup = (msgs.front().chat_type == "group");
+    int n = 0;
+    for(auto& m : msgs) {
+      if(m.time > logout && m.from_uid != self_uid) n++;
+    }
+    if(n > 0) {
+      items.push_back({id,isGroup,n});
+      total += n;
+    }
+  }
+  if(items.empty()) return;
+  std::cout << "[离线消息] 上次离线期间收到 " << total << " 条消息：\n";
+  for(auto& it : items) {
+    if(it.isGroup) {
+      std::string name;
+      for(auto& g : ctx_.getGroupList()) {
+        if(g.group_id == it.id) { name = g.name; break; }
+      }
+      if(name.empty()) name = "#" + std::to_string(it.id);
+      std::cout << "  群聊 [" << name << "] 有 " << it.count << " 条新消息\n";
+    } else {
+      auto f = ctx_.getFriend(it.id);
+      std::string nm = f ? f->username : ("#" + std::to_string(it.id));
+      std::cout << "  私聊 " << nm << "(uid:" << it.id << ") 发来 " << it.count << " 条\n";
+    }
+  }
 }
 
 bool CliUI::mainMenu() {
-  if(pushSeq_.load() > shownSeq_) {
-    shownSeq_ = pushSeq_.load();
-    std::cout << "[通知] 有新的消息/申请到达，可进入 私聊/群聊/好友申请 查看\n";
-  }
   show(ClientState::MAIN_MENU);
   switch(inputChoice(1,6)) {
     case 1: friendMenu(); break;
@@ -139,9 +194,19 @@ void CliUI::addFriend() {
 }
 
 void CliUI::deleteFriend() {
+  if(friendService_.listFriend() != 0) {
+    std::cout << "获取好友列表失败\n";
+    return;
+  }
+  auto friends = ctx_.getFriendList();
+  if(friends.empty()) {
+    std::cout << "暂无好友\n";
+    return;
+  }
   showFriendList();
-  int uid = inputUid("请输入要删除的好友uid(0返回):");
-  if(uid == 0) return;
+  int choice = inputChoice(0,(int)friends.size(),"请输入要删除的好友序号(0返回)：");
+  if(choice == 0) return;
+  int uid = friends[choice-1].uid;
   if(friendService_.del(uid) == 0) {
     std::cout << "删除成功\n";
   } else {
@@ -160,12 +225,14 @@ void CliUI::showFriendRequest() {
     return;
   }
   std::cout << "好友申请:\n";
+  int i = 0;
   for(auto &u : list) {
-    std::cout << "  " << u.uid << " " << u.username << '\n';
+    std::cout << "  " << ++i << ". " << u.uid << " " << u.username << '\n';
   }
   while(true) {
-    int uid = inputUid("请输入要处理的uid(0退出):");
-    if(uid == 0) return;
+    int choice = inputChoice(0,(int)list.size(),"请输入要处理的申请序号(0退出):");
+    if(choice == 0) return;
+    int uid = list[choice-1].uid;
     std::cout << "1.同意\n2.拒绝\n";
     int ch = inputChoice(1,2);
     if(ch == 1) {
@@ -180,17 +247,44 @@ void CliUI::showFriendRequest() {
 
 void CliUI::blockMenu() {
   while(true) {
-    std::cout << "\n----- 屏蔽管理 -----\n" << "1.屏蔽好友\n2.解除屏蔽\n3.查看屏蔽列表\n4.返回\n请选择：";
+    std::cout << "\n----- 屏蔽管理 -----\n" << "1.屏蔽好友\n2.解除屏蔽\n3.查看屏蔽列表\n4.返回\n";
     switch(inputChoice(1,4)) {
       case 1: {
-        int uid = inputUid("请输入要屏蔽的uid:");
-        if(friendService_.block(uid) == 0) std::cout << "已屏蔽\n";
+        if(friendService_.listFriend() != 0) {
+          std::cout << "获取好友列表失败\n";
+          break;
+        }
+        auto friends = ctx_.getFriendList();
+        if(friends.empty()) {
+          std::cout << "暂无好友\n";
+          break;
+        }
+        showFriendList();
+        int choice = inputChoice(0,(int)friends.size(),"请输入要屏蔽的好友序号(0返回)：");
+        if(choice == 0) break;
+        if(friendService_.block(friends[choice-1].uid) == 0) std::cout << "已屏蔽\n";
         else std::cout << "屏蔽失败\n";
         break;
       }
       case 2: {
-        int uid = inputUid("请输入要解除屏蔽的uid:");
-        if(friendService_.unblock(uid) == 0) std::cout << "已解除屏蔽\n";
+        if(friendService_.getBlockList() != 0) {
+          std::cout << "获取屏蔽列表失败\n";
+          break;
+        }
+        auto list = ctx_.getBlockList();
+        if(list.empty()) {
+          std::cout << "屏蔽列表为空\n";
+          break;
+        }
+        std::cout << "屏蔽列表:\n";
+        for(size_t i = 0; i < list.size(); i++) {
+          auto f = ctx_.getFriend(list[i]);
+          std::string name = f ? f->username : ("#" + std::to_string(list[i]));
+          std::cout << "  " << (i+1) << ". " << list[i] << " " << name << '\n';
+        }
+        int choice = inputChoice(0,(int)list.size(),"请输入要解除屏蔽的序号(0返回)：");
+        if(choice == 0) break;
+        if(friendService_.unblock(list[choice-1]) == 0) std::cout << "已解除屏蔽\n";
         else std::cout << "解除屏蔽失败\n";
         break;
       }
@@ -200,7 +294,11 @@ void CliUI::blockMenu() {
           if(list.empty()) std::cout << "屏蔽列表为空\n";
           else {
             std::cout << "屏蔽列表:\n";
-            for(int id : list) std::cout << "  " << id << '\n';
+            for(size_t i = 0; i < list.size(); i++) {
+              auto f = ctx_.getFriend(list[i]);
+              std::string name = f ? f->username : ("#" + std::to_string(list[i]));
+              std::cout << "  " << (i+1) << ". " << list[i] << " " << name << '\n';
+            }
           }
         } else {
           std::cout << "获取屏蔽列表失败\n";
@@ -227,8 +325,7 @@ void CliUI::privateChat() {
   for(auto &u : friends) {
     std::cout << "  " << ++i << ". " << u.uid << " " << u.username << (u.online ? " [在线]" : " [离线]") << '\n';
   }
-  std::cout << "请输入好友序号(0返回)：";
-  int choice = inputChoice(0,(int)friends.size());
+  int choice = inputChoice(0,(int)friends.size(),"请输入好友序号(0返回)：");
   if(choice == 0) return;
   chatLoop(friends[choice-1].uid,false);
 }
@@ -243,23 +340,19 @@ void CliUI::chatLoop(int peerId,bool isGroup) {
     std::cout << "--------------------\n";
   }
   chatPrinted_ = hist.size();
-  shownSeq_ = pushSeq_.load();
   std::cout << "进入" << title << "，输入 /exit 退出，/upload 发送文件，/download 下载文件\n";
-
-  std::string line;
+  inChat_ = true;
+  chatPeer_ = peerId;
+  chatIsGroup_ = isGroup;
   while(running_) {
-    if(!std::getline(std::cin,line)) break;
+    std::string line = readLine(""); //"[" + title + "] "
     if(line == "/exit") break;
     if(line == "/upload") {
       uploadFileToChat(peerId,isGroup);
-      printNewMessages(peerId);
-      shownSeq_ = pushSeq_.load();
       continue;
     }
     if(line == "/download") {
       downloadFile();
-      printNewMessages(peerId);
-      shownSeq_ = pushSeq_.load();
       continue;
     }
     if(line.empty()) continue;
@@ -269,11 +362,9 @@ void CliUI::chatLoop(int peerId,bool isGroup) {
     else rc = chatService_.sendPrivateMessage(peerId,line);
     if(rc != 0) {
       std::cout << "发送失败\n";
-    } else {
-      printNewMessages(peerId);
-      shownSeq_ = pushSeq_.load();
     }
   }
+  inChat_ = false;
   std::cout << "已退出" << title << "\n";
 }
 
@@ -283,7 +374,15 @@ void CliUI::printNewMessages(int peerId) {
   chatPrinted_ += msgs.size();
 }
 
-void CliUI::printMessage(const Message& msg) {
+std::vector<std::string> CliUI::formatNewMessages(int peerId) {
+  auto msgs = ctx_.getMessagesFrom(peerId,chatPrinted_);
+  chatPrinted_ += msgs.size();
+  std::vector<std::string> out;
+  for(auto& m : msgs) out.push_back(formatMessage(m));
+  return out;
+}
+
+std::string CliUI::formatMessage(const Message& msg) {
   std::string from;
   if(msg.chat_type == "group") {
     auto m = ctx_.getGroupMember(msg.target_id,msg.from_uid);
@@ -295,23 +394,28 @@ void CliUI::printMessage(const Message& msg) {
     from = f ? f->username : ("#" + std::to_string(msg.from_uid));
   }
 
-  std::cout << "[" << formatTime(msg.time) << "] " << from << ": ";
+  std::string out = "[" + formatTime(msg.time) + "] " + from + ": ";
   if(msg.type == "text") {
-    std::cout << msg.content << '\n';
+    out += msg.content;
   } else if(msg.type == "file") {
     try {
       auto fj = json::parse(msg.content);
-      std::cout << "[文件] " << fj.value("file_name","未知文件") << " (id:" << fj.value("file_id","") << ")\n";
+      out += "[文件] " + fj.value("file_name",std::string("未知文件")) + " (id:" + fj.value("file_id",std::string("")) + ")";
     } catch(...) {
-      std::cout << "[文件] " << msg.content << '\n';
+      out += "[文件] " + msg.content;
     }
   } else {
-    std::cout << "[" << msg.type << "] " << msg.content << '\n';
+    out += "[" + msg.type + "] " + msg.content;
   }
+  return out;
+}
+
+void CliUI::printMessage(const Message& msg) {
+  std::cout << formatMessage(msg) << '\n';
 }
 
 void CliUI::uploadFileToChat(int peerId,bool isGroup) {
-  std::string path = inputString("请输入文件路径:");
+  std::string path = readLine("请输入文件路径:");
   if(path.empty()) return;
   std::string chat_type = isGroup ? "group" : "private";
   int rc = fileService_.uploadFile(path,chat_type,peerId,
@@ -358,7 +462,7 @@ void CliUI::showGroupList() {
 }
 
 void CliUI::createGroup() {
-  std::string name = inputString("请输入群名称:");
+  std::string name = readLine("请输入群名称:");
   if(name.empty()) {
     std::cout << "群名称不能为空\n";
     return;
@@ -391,10 +495,16 @@ void CliUI::groupRoom() {
     return;
   }
   showGroupList();
-  std::cout << "请输入群序号(0返回)：";
-  int choice = inputChoice(0,(int)groups.size());
+  int choice = inputChoice(0,(int)groups.size(),"请输入群序号(0返回)：");
   if(choice == 0) return;
   chatLoop(groups[choice-1].group_id,true);
+}
+
+int CliUI::myGroupPermission(int gid) {
+  int perm = ctx_.getSelfPermission(gid);
+  if(perm >= 0) return perm;
+  if(groupService_.listMembers(gid) != 0) return -1;
+  return ctx_.getSelfPermission(gid);
 }
 
 void CliUI::groupManage() {
@@ -407,23 +517,58 @@ void CliUI::groupManage() {
     std::cout << "还没有加入任何群聊\n";
     return;
   }
-  showGroupList();
-  std::cout << "请选择要管理的群(0返回)：";
-  int choice = inputChoice(0,(int)groups.size());
+  std::vector<GroupInfo> manageable;
+  std::vector<int> perms;
+  for(auto& g : groups) {
+    int perm;
+    if(g.owner_uid == ctx_.getSelf().uid) {
+      perm = 0;
+    } else {
+      perm = myGroupPermission(g.group_id);
+      if(perm != 1) continue;
+    }
+    manageable.push_back(g);
+    perms.push_back(perm);
+  }
+  if(manageable.empty()) {
+    std::cout << "没有你有权限管理的群\n";
+    return;
+  }
+  std::cout << "\n可管理的群:\n";
+  for(size_t i = 0;i < manageable.size();i++) {
+    std::string role = (perms[i] == 0) ? "群主" : "管理员";
+    std::cout << "  " << (i+1) << ". [" << manageable[i].group_id << "] " << manageable[i].name << " (" << role << ")\n";
+  }
+  int choice = inputChoice(0,(int)manageable.size(),"请选择要管理的群(0返回)：");
   if(choice == 0) return;
-  int gid = groups[choice-1].group_id;
+  int gid = manageable[choice-1].group_id;
+  bool isOwner = (perms[choice-1] == 0);
 
   while(true) {
-    show(ClientState::GROUP_DETAIL_MENU);
-    switch(inputChoice(1,5)) {
-      case 1:
-        groupService_.listMembers(gid);
-        printMembers(ctx_.getGroupAllMembers(gid));
-        break;
-      case 2: handleGroupJoinRequest(gid); break;
-      case 3: setAdmin(gid); break;
-      case 4: kickMember(gid); break;
-      case 5: return;
+    std::cout << "\n--- 群管理 ---\n";
+    if(isOwner) {
+      std::cout << "1.查看群成员\n2.处理入群申请\n3.设置管理员\n4.踢出成员\n5.返回\n";
+      switch(inputChoice(1,5)) {
+        case 1:
+          groupService_.listMembers(gid);
+          printMembers(ctx_.getGroupAllMembers(gid));
+          break;
+        case 2: handleGroupJoinRequest(gid); break;
+        case 3: setAdmin(gid); break;
+        case 4: kickMember(gid); break;
+        case 5: return;
+      }
+    } else {
+      std::cout << "1.查看群成员\n2.处理入群申请\n3.踢出成员\n4.返回\n";
+      switch(inputChoice(1,4)) {
+        case 1:
+          groupService_.listMembers(gid);
+          printMembers(ctx_.getGroupAllMembers(gid));
+          break;
+        case 2: handleGroupJoinRequest(gid); break;
+        case 3: kickMember(gid); break;
+        case 4: return;
+      }
     }
   }
 }
@@ -439,12 +584,14 @@ void CliUI::handleGroupJoinRequest(int gid) {
     return;
   }
   std::cout << "入群申请:\n";
+  int i = 0;
   for(auto& u : reqs) {
-    std::cout << "  " << u.uid << " " << u.username << '\n';
+    std::cout << "  " << ++i << ". " << u.uid << " " << u.username << '\n';
   }
   while(true) {
-    int uid = inputUid("请输入要处理的用户uid(0退出):");
-    if(uid == 0) return;
+    int choice = inputChoice(0,(int)reqs.size(),"请输入要处理的申请序号(0退出):");
+    if(choice == 0) return;
+    int uid = reqs[choice-1].uid;
     std::cout << "1.同意\n2.拒绝\n";
     int ch = inputChoice(1,2);
     if(groupService_.handleJoinRequest(gid,uid,ch==1) == 0) {
@@ -457,9 +604,15 @@ void CliUI::handleGroupJoinRequest(int gid) {
 
 void CliUI::setAdmin(int gid) {
   groupService_.listMembers(gid);
-  printMembers(ctx_.getGroupAllMembers(gid));
-  int uid = inputUid("请输入要设置的成员uid(0返回):");
-  if(uid == 0) return;
+  auto members = ctx_.getGroupAllMembers(gid);
+  if(members.empty()) {
+    std::cout << "群成员为空\n";
+    return;
+  }
+  printMembers(members);
+  int choice = inputChoice(0,(int)members.size(),"请输入要设置的成员序号(0返回):");
+  if(choice == 0) return;
+  int uid = members[choice-1].uid;
   std::cout << "1.设为管理员\n2.取消管理员\n";
   int ch = inputChoice(1,2);
   if(groupService_.setAdmin(gid,uid,ch==1) == 0) {
@@ -471,9 +624,15 @@ void CliUI::setAdmin(int gid) {
 
 void CliUI::kickMember(int gid) {
   groupService_.listMembers(gid);
-  printMembers(ctx_.getGroupAllMembers(gid));
-  int uid = inputUid("请输入要踢出的成员uid(0返回):");
-  if(uid == 0) return;
+  auto members = ctx_.getGroupAllMembers(gid);
+  if(members.empty()) {
+    std::cout << "群成员为空\n";
+    return;
+  }
+  printMembers(members);
+  int choice = inputChoice(0,(int)members.size(),"请输入要踢出的成员序号(0返回):");
+  if(choice == 0) return;
+  int uid = members[choice-1].uid;
   if(groupService_.kickMember(gid,uid) == 0) {
     std::cout << "已踢出\n";
   } else {
@@ -492,8 +651,7 @@ void CliUI::leaveGroup() {
     return;
   }
   showGroupList();
-  std::cout << "请选择要退出的群(0返回)：";
-  int choice = inputChoice(0,(int)groups.size());
+  int choice = inputChoice(0,(int)groups.size(),"请选择要退出的群(0返回)：");
   if(choice == 0) return;
   int gid = groups[choice-1].group_id;
   if(groupService_.leaveGroup(gid) == 0) {
@@ -513,15 +671,25 @@ void CliUI::disbandGroup() {
     std::cout << "还没有加入任何群聊\n";
     return;
   }
-  showGroupList();
-  std::cout << "请选择要解散的群(0返回)：";
-  int choice = inputChoice(0,(int)groups.size());
+  std::vector<GroupInfo> ownable;
+  for(auto& g : groups) {
+    if(g.owner_uid == ctx_.getSelf().uid) ownable.push_back(g);
+  }
+  if(ownable.empty()) {
+    std::cout << "没有你有权解散的群（仅群主可解散）\n";
+    return;
+  }
+  std::cout << "\n可解散的群:\n";
+  for(size_t i = 0; i < ownable.size(); i++) {
+    std::cout << "  " << (i+1) << ". [" << ownable[i].group_id << "] " << ownable[i].name << "\n";
+  }
+  int choice = inputChoice(0,(int)ownable.size(),"请选择要解散的群(0返回)：");
   if(choice == 0) return;
-  int gid = groups[choice-1].group_id;
+  int gid = ownable[choice-1].group_id;
   if(groupService_.disbandGroup(gid) == 0) {
     std::cout << "群已解散\n";
   } else {
-    std::cout << "解散失败（仅群主可解散）\n";
+    std::cout << "解散失败\n";
   }
 }
 
@@ -531,9 +699,10 @@ void CliUI::printMembers(const std::vector<GroupMember>& members) {
     return;
   }
   std::cout << "\n群成员(" << members.size() << "):\n";
+  int i = 0;
   for(auto& m : members) {
     std::string role = (m.permission == 0) ? "群主" : (m.permission == 1) ? "管理员" : "成员";
-    std::cout << "  " << m.uid << " " << m.usr_name << " [" << role << "]\n";
+    std::cout << "  " << ++i << ". " << m.uid << " " << m.usr_name << " [" << role << "]\n";
   }
 }
 
@@ -549,11 +718,40 @@ void CliUI::fileMenu() {
 }
 
 void CliUI::uploadFile() {
-  std::string path = inputString("请输入文件路径:");
+  std::string path = readLine("请输入文件路径:");
   if(path.empty()) return;
   std::cout << "目标类型: 1=私聊 2=群聊\n";
   std::string chat_type = (inputChoice(1,2) == 1) ? "private" : "group";
-  int target_id = inputUid("请输入目标uid/gid:");
+  int target_id = 0;
+  if(chat_type == "private") {
+    if(friendService_.listFriend() != 0) {
+      std::cout << "获取好友列表失败\n";
+      return;
+    }
+    auto friends = ctx_.getFriendList();
+    if(friends.empty()) {
+      std::cout << "暂无好友\n";
+      return;
+    }
+    showFriendList();
+    int choice = inputChoice(0,(int)friends.size(),"请输入好友序号(0取消)：");
+    if(choice == 0) return;
+    target_id = friends[choice-1].uid;
+  } else {
+    if(groupService_.listMyGroups() != 0) {
+      std::cout << "获取群聊列表失败\n";
+      return;
+    }
+    auto groups = ctx_.getGroupList();
+    if(groups.empty()) {
+      std::cout << "还没有加入任何群聊\n";
+      return;
+    }
+    showGroupList();
+    int choice = inputChoice(0,(int)groups.size(),"请输入群序号(0取消)：");
+    if(choice == 0) return;
+    target_id = groups[choice-1].group_id;
+  }
   int rc = fileService_.uploadFile(path,chat_type,target_id,
     [](uint64_t done,uint64_t total){
       int pct = (int)(done*100/total);
@@ -565,8 +763,8 @@ void CliUI::uploadFile() {
 }
 
 void CliUI::downloadFile() {
-  std::string file_id = inputString("请输入file_id:");
-  std::string file_name = inputString("请输入file_name:");
+  std::string file_id = readLine("请输入file_id:");
+  std::string file_name = readLine("请输入file_name:");
   if(file_id.empty()) return;
   std::string dir = std::string(getenv("HOME")) + "/Download";
   mkdir(dir.c_str(),0755);
@@ -588,7 +786,7 @@ void CliUI::downloadFile() {
 
 void CliUI::deleteAccount() {
   std::cout << "警告：注销账户将删除账号，且不可恢复！\n";
-  std::string pwd = inputString("请输入密码确认:");
+  std::string pwd = inputPassword("请输入密码确认:");
   if(authService_.delauth(pwd)) {
     std::cout << "账户已注销\n";
     running_ = false;
@@ -615,39 +813,150 @@ void CliUI::show(ClientState state) {
   for(size_t i = 0;i < menu->size();i++) {
     std::cout << i+1 << ". " << (*menu)[i] << '\n';
   }
-  std::cout << "请选择：";
 }
 
-int CliUI::inputChoice(int min,int max) {
-  int choice;
+int CliUI::inputChoice(int min,int max,const std::string& prompt) {
   while(true) {
-    std::cin >> choice;
-    if(std::cin.fail()) {
-      std::cin.clear();
-      std::cin.ignore(std::numeric_limits<std::streamsize>::max(),'\n');
-      continue;
-    }
-    std::cin.ignore(std::numeric_limits<std::streamsize>::max(),'\n');
-    if(choice >= min && choice <= max) return choice;
-    std::cout << "请输入 " << min << "-" << max << "：";
+    std::string s = readLine(prompt);
+    try {
+      int c = std::stoi(s);
+      if(c >= min && c <= max) return c;
+    } catch(...) {}
+    std::cout << "请输入 " << min << "-" << max << "\n";
   }
 }
 
-std::string CliUI::inputString(const std::string& prompt) {
-  std::cout << prompt;
-  std::string s;
-  std::getline(std::cin,s);
-  return s;
+// std::string CliUI::inputString(const std::string& prompt) {
+//   return readLine(prompt);
+// }
+
+std::string CliUI::inputPassword(const std::string& prompt) {
+  return readLine(prompt,true);
 }
 
 int CliUI::inputUid(const std::string& prompt) {
   while(true) {
-    std::string s = inputString(prompt);
+    std::string s = readLine(prompt);
     try {
       return std::stoi(s);
     } catch(...) {
       std::cout << "请输入合法数字\n";
     }
+  }
+}
+
+static bool hasSpecialKey(const std::string& line) {
+  for(unsigned char c : line) {
+    if(c == 0x1B || c < 0x20 || c == 0x7F) return true;
+  }
+  return false;
+}
+
+std::string CliUI::readLine(const std::string& prompt,bool hidden) {
+  termios oldt{}, newt{};
+  bool tty = isatty(STDIN_FILENO) == 1;
+  if(hidden && tty) {
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~ECHO;
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+  }
+  if(!prompt.empty()) {
+    std::lock_guard<std::mutex> lock(outMtx_);
+    std::cout << prompt;
+    std::cout.flush();
+  }
+  std::string line;
+  while(true) {
+    std::getline(std::cin, line);
+    if(std::cin.eof()) { running_ = false; line.clear(); break; }
+    if(!hasSpecialKey(line)) break;
+    {
+      std::lock_guard<std::mutex> lock(outMtx_);
+      std::cout << "\n检测到特殊按键，已忽略，请重新输入\n" << prompt;
+      std::cout.flush();
+    }
+    line.clear();
+  }
+  if(hidden && tty) {
+    tcsetattr(STDIN_FILENO,TCSANOW,&oldt);
+    std::cout << "\n";
+  }
+  return line;
+}
+
+bool CliUI::isChatOf(const Message& msg) {
+  if(chatIsGroup_) return msg.chat_type == "group" && msg.target_id == chatPeer_;
+  return msg.chat_type == "private" && (msg.from_uid == chatPeer_ || msg.target_id == chatPeer_);
+}
+
+std::string CliUI::chatSourceName(const Message& msg) {
+  if(msg.chat_type == "group") {
+    std::string name;
+    for(auto& g : ctx_.getGroupList()) {
+      if(g.group_id == msg.target_id) {
+        name = g.name;
+        break;
+      }
+    }
+    if(name.empty()) return "群聊 #" + std::to_string(msg.target_id);
+    return "群聊 [" + name + "] (gid:" + std::to_string(msg.target_id) + ")";
+  }
+  if(msg.from_uid == ctx_.getSelf().uid) {
+    auto f = ctx_.getFriend(msg.target_id);
+    if(f) return "私聊 发给 " + f->username + " (uid:" + std::to_string(msg.target_id) + ")";
+    return "私聊 发给 #" + std::to_string(msg.target_id);
+  }
+  auto f = ctx_.getFriend(msg.from_uid);
+  if(f) return "私聊 来自 " + f->username + " (uid:" + std::to_string(msg.from_uid) + ")";
+  return "私聊 来自 #" + std::to_string(msg.from_uid);
+}
+
+void CliUI::handleChatPush(const json& push) {
+  Message m;
+  try {
+    m = push["data"].get<Message>();
+  } catch(...) {
+    return;
+  }
+  if(m.chat_type == "private" && m.from_uid != ctx_.getSelf().uid && !ctx_.getFriend(m.from_uid)) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(outMtx_);
+  if(inChat_ && isChatOf(m)) {
+    std::cout << "\n" << formatMessage(m) << "\n";
+  } else {
+    std::cout << "\n[" << formatTime(m.time) << "] " << chatSourceName(m) << "\n";
+  }
+  std::cout.flush();
+}
+
+void CliUI::handleUiPush(const json& push) {
+  std::string type = push.value("type","");
+  if(type == "send_result") {
+    if(push.value("status",-1) != 0) {
+      std::lock_guard<std::mutex> lock(outMtx_);
+      std::cout << "发送失败：" << sendErrorText(push) << "\n";
+    }
+    return;
+  }
+  if(type == "friend") {
+    std::cout << "\n";
+    std::lock_guard<std::mutex> lock(outMtx_);
+    std::string action = push.value("action","");
+    std::string name = push.value("data",json()).value("username",std::string());
+    if(action == "request") std::cout << "[好友申请] " << name << " 请求添加你为好友\n";
+    else if(action == "agree") std::cout << "[好友] " << name << " 已同意你的好友申请\n";
+    else if(action == "del") std::cout << "[好友] " << name << " 已删除好友关系\n";
+    else if(action == "online") std::cout << "[好友] " << name << " 上线了\n";
+    else if(action == "offline") std::cout << "[好友] " << name << " 下线了\n";
+    return;
+  }
+  if(type == "group") {
+    std::lock_guard<std::mutex> lock(outMtx_);
+    std::cout << "\n";
+    std::cout << "[群聊] 有新的动态（" << push.value("action",std::string("?")) << "）\n";
+    return;
   }
 }
 

@@ -643,34 +643,41 @@ void WebUI::setupRoutes() {
   });
 
   // 文件
-  // 浏览器拖拽上传，浏览器前端直接传文件内容到客户端，客户端临时存储后走现有上传链路
-  svr_.Post("/api/file/upload",[&](const httplib::Request& req,httplib::Response& res) {
+  // 浏览器拖拽上传：前端直接流式发送文件原始字节（octet-stream）
+  // 边收边写临时文件，避免整个文件读入内存导致 OOM
+  svr_.Post("/api/file/upload",[&](const httplib::Request& req,httplib::Response& res,const httplib::ContentReader& content_reader) {
     try {
-      if(!req.form.has_file("file")) {
-        res.status=400;
-        res.set_content(R"({"status":-1})","application/json");
-        return;
-      }
-      auto f = req.form.get_file("file");
       std::string chat_type = req.get_param_value("chat_type");
       int target_id = 0;
-      try {
-        target_id = std::stoi(req.get_param_value("target_id"));
-      } catch(...) {}
-      if(chat_type.empty() || target_id == 0 || f.content.empty()) {
+      try { target_id = std::stoi(req.get_param_value("target_id")); } catch(...) {}
+      std::string filename = req.get_param_value("filename");
+      if(filename.empty()) filename = "unnamed";
+      if(chat_type.empty() || target_id == 0) {
         res.status=400;
         res.set_content(R"({"status":-2})","application/json");
         return;
       }
-      if((int64_t)f.content.size() > MAX_FILE_SIZE) {
-        res.set_content(R"({"status":-3})","application/json");
-        return; // 超过大小限制
-      }
       std::string tmp = "/tmp/chat_upload_" + std::to_string(ctx_.getSelf().uid) + "_" + std::to_string(now_ms());
+      uint64_t received = 0;
       {
-        std::ofstream ofs(tmp, std::ios::binary);
-        ofs.write(f.content.data(),(std::streamsize)f.content.size());
+        std::ofstream ofs(tmp,std::ios::binary);
+        bool ok = content_reader([&](const char* data,size_t data_length) {
+          if(received + data_length > (uint64_t)MAX_FILE_SIZE) return false;   // 超过上限，中断接收
+          received += data_length;
+          ofs.write(data,(std::streamsize)data_length);
+          return true;
+        });
         ofs.close();
+        if(!ok || received == 0) {
+          unlink(tmp.c_str());
+          if(received > (uint64_t)MAX_FILE_SIZE) {
+            res.status=413;
+            res.set_content(R"({"status":-3})","application/json");
+          } else {
+            res.set_content(R"({"status":-2})","application/json");
+          }
+          return;
+        }
       }
       struct TmpGuard {
         std::string path;
@@ -681,9 +688,9 @@ void WebUI::setupRoutes() {
       int ret = file_.uploadFile(tmp,chat_type,target_id,
         [&](uint64_t offset, uint64_t total) {
           broadcast(json{{"type","file_progress"},{"offset",offset},{"total",total}});
-        },f.filename);
+        },filename);
       broadcast(json{{"type","file_done"},{"status",ret}});
-      logLine("上传文件: " + f.filename + " size=" + std::to_string(f.content.size())
+      logLine("上传文件: " + filename + " size=" + std::to_string(received)
         + " 目标=" + chat_type + ":" + std::to_string(target_id)
         + " 结果=" + std::to_string(ret));
       res.set_content(json{{"status",ret}}.dump(),"application/json");

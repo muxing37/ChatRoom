@@ -7,12 +7,6 @@
 #include <iomanip>
 #include <filesystem>
 
-const std::string SAVEPATH = "./data";
-const std::string USRDATA = SAVEPATH + "/usrdata.json";
-const std::string FRIENDDATA = SAVEPATH + "/frienddata.json";
-const std::string PCHATDATA = SAVEPATH + "/pchatdata.json";
-const std::string GROUPDATA = SAVEPATH + "/groupdata.json";
-
 // 未完成上传的过期时间，超过该时长仍未完成的 .uploading 视为放弃，服务端重启时删除
 constexpr uint64_t UPLOAD_STALE_MS = 24ULL * 3600 * 1000; // 24 小时
 
@@ -283,8 +277,6 @@ bool FriendManager::removeUsr(int uid) {
   for(auto& [u,set] : friends_) set.erase(uid);
   for(auto& [u,set] : requests_) set.erase(uid);
   for(auto& [u,set] : block_) set.erase(uid);
-
-
   return true;
 }
 

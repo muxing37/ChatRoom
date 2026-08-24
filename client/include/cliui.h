@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <mutex>
 
 enum class ClientState {
   LOGIN,
@@ -25,14 +26,17 @@ public:
     FileService& fileService,
     ClientContext& ctx
   );
+  ~CliUI();
   bool run();
-  void notifyPush();
+  void handleChatPush(const nlohmann::json& push);
+  void handleUiPush(const nlohmann::json& push);
 
 private:
   // 登录/主循环
   bool loginMenu();
   bool mainMenu();
   void init();
+  void showOfflineMessages();
   // 好友
   void friendMenu();
   void showFriendList();
@@ -54,6 +58,7 @@ private:
   void groupRoom();
   void groupManage();
   void handleGroupJoinRequest(int gid);
+  int myGroupPermission(int gid);
   void setAdmin(int gid);
   void kickMember(int gid);
   void leaveGroup();
@@ -67,10 +72,17 @@ private:
   void deleteAccount();
   // 通用展示/输入
   void show(ClientState state);
-  int inputChoice(int min,int max);
-  std::string inputString(const std::string& prompt);
+  int inputChoice(int min,int max,const std::string& prompt="请选择：");
+  // std::string inputString(const std::string& prompt);
+  std::string inputPassword(const std::string& prompt); // 密码隐藏输入
   int inputUid(const std::string& prompt);
   std::string formatTime(uint64_t t);
+
+  std::string readLine(const std::string& prompt,bool hidden = false);
+  bool isChatOf(const Message& msg);
+  std::string chatSourceName(const Message& msg);
+  std::string formatMessage(const Message& msg);
+  std::vector<std::string> formatNewMessages(int peerId);
 
 private:
   AuthService& authService_;
@@ -80,9 +92,12 @@ private:
   FileService& fileService_;
   ClientContext& ctx_;
   bool running_=true;
-  std::atomic<uint64_t> pushSeq_{0};
-  uint64_t shownSeq_=0;
   size_t chatPrinted_=0;
+
+  std::mutex outMtx_;
+  std::atomic<bool> inChat_{false};
+  std::atomic<int> chatPeer_{0};
+  std::atomic<bool> chatIsGroup_{false};
 
 private:
   const std::vector<std::string> menu_login_={
