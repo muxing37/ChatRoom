@@ -95,7 +95,11 @@ int start_client(const std::string& ip,unsigned short port) {
       CliUI cli(authService,friendService,chatService,groupService,fileService,ctx);
       network.setPushHandler([&](const nlohmann::json& push) {
         dispatchPush(push,friendService,chatService,groupService);
-        cli.notifyPush();
+        if(push.value("type",std::string()) == "chat") {
+          cli.handleChatPush(push);
+        } else {
+          cli.handleUiPush(push);
+        }
       });
       bool exit = cli.run();
       network.stop();

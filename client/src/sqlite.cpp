@@ -93,3 +93,16 @@ std::vector<Message> LocalDb::loadAll() {
   sqlite3_finalize(stmt);
   return result;
 }
+
+bool LocalDb::removeMessagesWith(int uid) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  if(!db_) return false;
+  sqlite3_stmt* stmt = nullptr;
+  const char* sql = "DELETE FROM messages WHERE chat_type='private' AND (from_uid=? OR target_id=?)";
+  if(sqlite3_prepare_v2(db_,sql,-1,&stmt,nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(stmt,1,uid);
+  sqlite3_bind_int64(stmt,2,uid);
+  bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+  sqlite3_finalize(stmt);
+  return ok;
+}

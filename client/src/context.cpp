@@ -82,6 +82,8 @@ void ClientContext::addFriend(const User& user) {
 void ClientContext::delFriend(int uid) {
   std::lock_guard lock(mtx_);
   friends_.erase(uid);
+  msgs_.erase(uid);
+  local_db_.removeMessagesWith(uid);
 }
 
 void ClientContext::setFriendRequests(const std::vector<User>& list) {

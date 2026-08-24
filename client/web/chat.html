@@ -1679,6 +1679,13 @@ function removePending(k){
   const el=document.querySelector('[data-pend="'+pend.id+'"]');
   if(el) el.remove();
 }
+// 发送失败原因映射（服务端 error → 中文提示）
+function sendErrText(e){
+  const map={'blocked by receiver':'对方已将你屏蔽','not friends':'对方不是你的好友',
+             'not member':'你不在该群','fake request':'非法请求','timeout':'发送超时',
+             'disconnected':'连接已断开'};
+  return map[e] || (e||'未知错误');
+}
 // 输入框随内容自适应高度（上限 120px）；文字占满后才显示滚动条
 function autoResizeInput(){
   const t=document.getElementById('msgInput');
@@ -2130,6 +2137,10 @@ async function handlePush(p){
     renderList();
     updateStat();
     if(S.groupPanel) loadGroupPanel(S.groupPanel);
+  } else if(t==='send_result'){
+    const k=keyOf(p.chat_type, p.target_id);
+    removePending(k);                 // 失败：按发送顺序移除该会话最早的 pending
+    if(p.status!==0) toast('发送失败：'+sendErrText(p.error), 'err');
   } else if(t==='file_progress'){
     if(S.uploading && upMsg){
       // 上传中：同步本地气泡进度（客户端→服务端真实进度 0-100%）

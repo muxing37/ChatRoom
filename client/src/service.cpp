@@ -239,7 +239,9 @@ int FriendService::del(int uid) {
   j["data"]["from_uid"] = ctx_.getSelf().uid;
   j["data"]["to_uid"] = uid;
   auto reply = network_.request(j);
-
+  if(reply["status"] == 0) {
+    ctx_.delFriend(uid);
+  }
   return reply["status"];
 }
 
@@ -368,6 +370,10 @@ void FriendService::handlePush(const nlohmann::json& push) {
 
 ChatService::ChatService(ClientNetwork& network,ClientContext& ctx) : network_(network),ctx_(ctx){}
 
+void ChatService::setSendResultHandler(SendResultHandler h) {
+  sendResultHandler_ = std::move(h);
+}
+
 int ChatService::sendPrivateMessage(int to_uid,const std::string& text) {
   nlohmann::json j;
   j["type"] = "chat";
@@ -382,8 +388,11 @@ int ChatService::sendPrivateMessage(int to_uid,const std::string& text) {
     {"time",0},
     {"status",0}
   };
-  if(!network_.requestWithoutWait(j,[this](const nlohmann::json& reply) {
-      if(reply["status"] != 0) return;
+  if(!network_.requestWithoutWait(j,[this,to_uid](const nlohmann::json& reply) {
+      if(reply["status"] != 0) {
+        if(sendResultHandler_) sendResultHandler_(reply,"private",to_uid);
+        return;
+      }
       try {
         Message msg = reply["data"].get<Message>();
         if(ctx_.isMessageRepeat(msg.message_id)) return;
@@ -410,8 +419,11 @@ int ChatService::sendGroupMessage(int gid,const std::string& text) {
     {"time",0},
     {"status",0},
   };
-  if(!network_.requestWithoutWait(j,[this](const nlohmann::json& reply) {
-      if(reply["status"] != 0) return;
+  if(!network_.requestWithoutWait(j,[this,gid](const nlohmann::json& reply) {
+      if(reply["status"] != 0) {
+        if(sendResultHandler_) sendResultHandler_(reply,"group",gid);
+        return;
+      }
       try {
         Message msg = reply["data"].get<Message>();
         if(ctx_.isMessageRepeat(msg.message_id)) return;

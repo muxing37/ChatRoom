@@ -89,16 +89,19 @@ private:
 
 class ChatService {
 public:
+  using SendResultHandler = std::function<void(const nlohmann::json& reply,const std::string& chat_type,int target_id)>;
   ChatService(ClientNetwork& network,ClientContext& ctx);
   int sendPrivateMessage(int to_uid,const std::string& text); //发送私聊消息
   int sendGroupMessage(int gid,const std::string& text); //发送群聊消息
   int syncHistory(); //从服务端同步聊天记录
   std::vector<Message> getMessages(int uid); //从本地ctx获取聊天记录
   void handlePush(const nlohmann::json& push);
+  void setSendResultHandler(SendResultHandler h); //设置发送结果回调（失败时通知 UI）
 
 private:
   ClientNetwork& network_;
   ClientContext& ctx_;
+  SendResultHandler sendResultHandler_;
 };
 
 class GroupService {

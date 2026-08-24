@@ -10,6 +10,7 @@ public:
     bool init(const std::string& path);
     void close();
     bool save(const Message& msg);
+    bool removeMessagesWith(int uid);
     std::vector<Message> loadAll();
 
 private:

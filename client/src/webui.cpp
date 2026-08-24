@@ -72,7 +72,18 @@ WebUI::WebUI(
   FileService& file,
   ClientContext& ctx
 )
-  : auth_(auth),friend_(fri),chat_(chat),group_(grp),file_(file),ctx_(ctx) {}
+  : auth_(auth),friend_(fri),chat_(chat),group_(grp),file_(file),ctx_(ctx) {
+  chat_.setSendResultHandler([this](const nlohmann::json& reply,const std::string& chat_type,int target){
+    nlohmann::json ev = {
+      {"type","send_result"},
+      {"status",reply.value("status",-1)},
+      {"error",reply.value("error","")},
+      {"chat_type",chat_type},
+      {"target_id",target}
+    };
+    broadcast(ev);
+  });
+}
 
 WebUI::~WebUI() {
   svr_.stop();
@@ -260,17 +271,6 @@ void WebUI::setupRoutes() {
     for(auto& u : friends) {
       auto lm = infoFromVec(ctx_.getMessage(u.uid));
       arr.push_back({{"uid",u.uid},{"username",u.username},{"online",u.online},{"last_time",lm["time"]},{"last_msg",lm["preview"]},{"last_from",lm["from"]},{"history",false},{"unread",lm["unread"]}});
-    }
-    {
-      std::unordered_set<int> fset;
-      for(auto& u : friends) fset.insert(u.uid);
-      int myself = ctx_.getSelf().uid;
-      for(auto& [id, msgs] : ctx_.getAllMessages()) {
-        if(msgs.empty() || msgs.front().chat_type != "private") continue;
-        if(id == myself || fset.count(id)) continue;
-        auto lm = infoFromVec(msgs);
-        arr.push_back({{"uid",id},{"username",""},{"online",false},{"last_time",lm["time"]},{"last_msg",lm["preview"]},{"last_from",lm["from"]},{"history",true},{"unread",lm["unread"]}});
-      }
     }
     res.set_content(json{{"status",0},{"friends",arr}}.dump(),"application/json");
   });
