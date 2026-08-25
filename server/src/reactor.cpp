@@ -432,6 +432,7 @@ void Connection::handleClose() {
 FileConn::FileConn(EventLoop* loop,int fd)
   : loop_(loop),fd_(fd),channel_(nullptr)
 {
+  read_buf_.resize(1024 * 1024);
   channel_ = new Channel(loop_,fd_);
   channel_->setReadBack([this] { handleRead(); });
   channel_->setWriteBack([this] { handleWrite(); });
@@ -495,11 +496,10 @@ void FileConn::handleWrite() {
 }
 
 void FileConn::handleRead() {
-  char buf[65536];
   while(true) {
-    ssize_t n = netNonBlocking::readN(fd_,buf,sizeof(buf));
+    ssize_t n = netNonBlocking::readN(fd_,read_buf_.data(),read_buf_.size());
     if(n > 0) {
-      if(read_cb_) read_cb_(buf,(size_t)n);
+      if(read_cb_) read_cb_(read_buf_.data(),(size_t)n);
     } else if(n == 0) {
       handleClose();
       return;

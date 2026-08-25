@@ -3,6 +3,8 @@
 #include <limits>
 #include <cstdlib>
 #include <ctime>
+#include <chrono>
+#include <iomanip>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <termios.h>
@@ -20,6 +22,40 @@ namespace {
     if(e == "disconnected") return "连接已断开";
     return e.empty() ? "未知错误" : e;
   }
+
+  struct TransferStat {
+    uint64_t lastBytes = 0;
+    std::chrono::steady_clock::time_point lastTp;
+    std::chrono::steady_clock::time_point winStart;
+    uint64_t winBytes = 0;
+    bool hasLast = false;
+    bool hasWin = false;
+    double display = 0;
+    void operator()(const char* label,uint64_t done,uint64_t total) {
+      auto now = std::chrono::steady_clock::now();
+      if(hasLast && done >= lastBytes) {
+        winBytes += done - lastBytes;
+      }
+      lastBytes = done;
+      lastTp = now;
+      hasLast = true;
+      if(!hasWin) {
+        winStart = now;
+        hasWin = true;
+      }
+      auto winMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - winStart).count();
+      if(winMs >= 250 || done >= total) {
+        if(winMs > 0) {
+          display = (double)winBytes / (winMs / 1000.0) / (1024.0 * 1024.0);
+        }
+        winBytes = 0;
+        winStart = now;
+      }
+      int pct = (int)(done*100/total);
+      std::cout << "\r" << label << ": " << pct << "% (" << done << "/" << total << ")  " << std::fixed << std::setprecision(2) << display << " MB/s  ";
+      std::cout.flush();
+    }
+  };
 }
 
 CliUI::CliUI(
@@ -418,12 +454,9 @@ void CliUI::uploadFileToChat(int peerId,bool isGroup) {
   std::string path = readLine("请输入文件路径:");
   if(path.empty()) return;
   std::string chat_type = isGroup ? "group" : "private";
+  TransferStat st;
   int rc = fileService_.uploadFile(path,chat_type,peerId,
-    [](uint64_t done,uint64_t total){
-      int pct = (int)(done*100/total);
-      std::cout << "\r上传中: " << pct << "% (" << done << "/" << total << ")  ";
-      std::cout.flush();
-    });
+    [&st](uint64_t done,uint64_t total){ st("上传中",done,total); });
   if(rc == 0) std::cout << "\n上传完成\n";
   else std::cout << "\n上传失败(code=" << rc << ")\n";
 }
@@ -752,12 +785,9 @@ void CliUI::uploadFile() {
     if(choice == 0) return;
     target_id = groups[choice-1].group_id;
   }
+  TransferStat st;
   int rc = fileService_.uploadFile(path,chat_type,target_id,
-    [](uint64_t done,uint64_t total){
-      int pct = (int)(done*100/total);
-      std::cout << "\r上传中: " << pct << "% (" << done << "/" << total << ")  ";
-      std::cout.flush();
-    });
+    [&st](uint64_t done,uint64_t total){ st("上传中",done,total); });
   if(rc == 0) std::cout << "\n上传完成\n";
   else std::cout << "\n上传失败(code=" << rc << ")\n";
 }
@@ -773,12 +803,9 @@ void CliUI::downloadFile() {
   uint64_t resume = 0;
   struct stat st;
   if(stat(save_path.c_str(),&st) == 0 && S_ISREG(st.st_mode)) resume = (uint64_t)st.st_size;
+  TransferStat ts;
   int rc = fileService_.downloadFile(file_id,save_path,
-    [](uint64_t done,uint64_t total){
-      int pct = (int)(done*100/total);
-      std::cout << "\r下载中: " << pct << "% (" << done << "/" << total << ")  ";
-      std::cout.flush();
-    },resume);
+    [&ts](uint64_t done,uint64_t total){ ts("下载中",done,total); },resume);
   std::rename(save_path.c_str(),final_path.c_str());
   if(rc == 0) std::cout << "\n下载完成: " << final_path << "\n";
   else std::cout << "\n下载失败(code=" << rc << ")\n";
@@ -825,10 +852,6 @@ int CliUI::inputChoice(int min,int max,const std::string& prompt) {
     std::cout << "请输入 " << min << "-" << max << "\n";
   }
 }
-
-// std::string CliUI::inputString(const std::string& prompt) {
-//   return readLine(prompt);
-// }
 
 std::string CliUI::inputPassword(const std::string& prompt) {
   return readLine(prompt,true);

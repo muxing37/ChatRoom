@@ -209,4 +209,5 @@ private:
   std::function<void()> close_cb_;
   std::function<void()> write_empty_cb_;
   std::function<void(const char*,size_t)> read_cb_;
+  std::vector<char> read_buf_;
 };

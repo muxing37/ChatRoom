@@ -76,7 +76,7 @@ struct JoinRequest { // 好友/加群申请时间、留言等
 
 struct Message {
     std::string message_id;
-    std::string type; // text, file, system
+    std::string type; // text, file
     std::string chat_type; // private, group
 
     int from_uid;
